@@ -1,0 +1,32 @@
+# Lint settings for apitrace only. Ruff resolves configuration per file against the
+# nearest config in its ancestors, so this applies to apitrace.py and leaves the rest
+# of the shed on the defaults.
+#
+# apitrace.py is committed exactly as written, byte for byte. It is a finished
+# single-file program whose own AGENTS.md warns that changes which look harmless
+# silently corrupt the debugger, so it is not worth rewriting working code to satisfy a
+# style preference. Keeping it identical also means a future revision from its author
+# arrives as a clean diff rather than one tangled up with reformatting.
+#
+# Each ignore below is a deliberate decision rather than a rule nobody looked at. If
+# any of them stops being true, delete the line and fix the code.
+
+[lint]
+ignore = [
+    # Percent formatting rather than f-strings, at twelve sites. It is the file's
+    # consistent style throughout, inherited from the C program this was ported from,
+    # and one of them (`"0x%0*x" % (PTR * 2, v)`) uses a runtime field width that an
+    # f-string expresses far less legibly. Converting some and not others would be
+    # worse than either extreme.
+    "UP031",
+
+    # `g_out = open(out_path, "w") if out_path else sys.stdout` in main(). The stream
+    # has to outlive the expression, is written to from `out()` throughout the debug
+    # loop, and is closed in main()'s finally block only when it is not stdout. A
+    # context manager here would mean restructuring main() around it for no gain.
+    "SIM115",
+
+    # Import order. `import sys` before `import ctypes` is how the file arrived, and
+    # the two are unrelated stdlib modules whose order changes nothing.
+    "I001",
+]
