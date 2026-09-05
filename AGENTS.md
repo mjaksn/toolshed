@@ -49,9 +49,11 @@ tool is set up by following its own README.
 | Run | per tool, see its README |
 
 `ruff check .` was run in this checkout: it reports `warning: No Python files
-found under the given path(s)` and passes, which is the true state of an empty
-repository rather than evidence that anything was checked. CI runs the same
-command, so the first Python file to land is linted on arrival.
+found under the given path(s)` and passes, which says only that no Python has
+arrived yet rather than that anything was checked. CI runs the same command, so
+the first Python file to land is linted on arrival. Nothing lints the PowerShell
+in here, which is a real gap rather than a decision: a PSScriptAnalyzer job
+needs the module pinned by version and hash first.
 
 Every command in this table has been run in this repo and its output verified.
 If one is added without running it, mark it `UNVERIFIED` rather than implying

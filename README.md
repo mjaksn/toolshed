@@ -7,7 +7,11 @@ Small scripts and helper apps that belong to no particular project. Anything
 useful enough to keep and too small, too general, or too unrelated to live in
 a repository of its own goes in here.
 
-The repository is new and holds nothing but its scaffolding yet.
+## What is in here
+
+- [dispatch-desk](dispatch-desk/), a PowerShell script that creates Windows
+  desktop shortcuts, each one dispatching a GitHub Actions workflow and then
+  watching the run through to its conclusion.
 
 ## What belongs here
 
