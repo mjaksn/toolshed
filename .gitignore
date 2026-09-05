@@ -17,6 +17,12 @@ venv/
 .idea/
 .vscode/
 
+# Windows shell leavings. Explorer writes both into any directory it is asked
+# to display a certain way, and this is a repository whose common case is
+# somebody on Windows opening a tool's folder to read it.
+Thumbs.db
+desktop.ini
+
 # Agent tooling scratch. A worktree is a checkout of this repository living
 # inside it, which git would otherwise try to record as a nested repo, and
 # settings.local.json is per-user. A shared .claude/settings.json is
