@@ -53,9 +53,11 @@ hello
 [apitrace] target exited, code 0
 ```
 
-That run is real, from Windows 11 with 64-bit Python 3.12. Without `-f` the same command
-hooks several thousand exports and the trace is correspondingly enormous, which is the
-point of the filters.
+That run is real, from Windows 11 with 64-bit Python 3.12. Without `-f` it would try
+every named export the two default modules have, which on this Windows 11 is 1,693 in
+`kernel32.dll` and 2,516 in `ntdll.dll`, so roughly 4,200 breakpoints and a trace to
+match. An unfiltered run of even `cmd.exe /c exit` takes minutes rather than seconds.
+That is what the filters are for.
 
 If you run this from a shell that rewrites paths, such as git bash, note that `/c` is
 mangled into `C:/` before it ever reaches the target. Use PowerShell or cmd, or quote it

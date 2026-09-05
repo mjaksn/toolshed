@@ -224,41 +224,85 @@ function Read-ParameterValue {
 # ---------------------------------------------------------------------
 # YAML helpers
 # ---------------------------------------------------------------------
+# powershell-yaml, pinned by version and by hash. Raising the version means
+# replacing both, and the hash is the SHA256 of the .nupkg the gallery serves for
+# that version. Install-Module cannot express this: -RequiredVersion pins the
+# version and nothing checks what actually arrived.
+$YamlVersion = '0.4.12'
+$YamlSha256  = 'd4602bc7a4a093766520422d53ca8b09acde162286fae11e2ee6c8edfea07810'
+
 function Initialize-YamlModule {
-    if (Get-Module -ListAvailable -Name powershell-yaml) {
-        Import-Module powershell-yaml -ErrorAction Stop
-        return
+    # Fetched from the gallery as a package file, checked against the recorded
+    # hash, and imported from where it was unpacked. It is never installed, so
+    # whatever else is on the machine is neither used nor disturbed.
+    $loaded = @(Get-Module -Name powershell-yaml)[0]
+    if ($loaded -and $loaded.Version -eq [version]$YamlVersion) { return }
+
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) "powershell-yaml-$YamlVersion"
+    $pkg  = "$root.zip"
+    $psd1 = Join-Path $root 'powershell-yaml.psd1'
+
+    if (-not (Test-Path -LiteralPath $pkg)) {
+        Write-Host ""
+        Write-Host "The powershell-yaml module is needed to read workflow inputs and is not here yet." -ForegroundColor Yellow
+        if (-not (Read-YesNo "Fetch powershell-yaml $YamlVersion from the PowerShell Gallery now?")) {
+            Stop-WithError @(
+                'powershell-yaml is required.',
+                'Answering yes installs nothing. The package is cached at',
+                "  $pkg",
+                'and can be deleted at any time.'
+            )
+        }
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            Write-Info "Fetching powershell-yaml $YamlVersion..."
+            # Saved under a .zip name because that is what a .nupkg is, and
+            # because Expand-Archive has been particular about the extension.
+            Invoke-WebRequest -UseBasicParsing -MaximumRedirection 5 -OutFile $pkg `
+                -Uri "https://www.powershellgallery.com/api/v2/package/powershell-yaml/$YamlVersion"
+        }
+        catch {
+            Stop-WithError @(
+                "Could not fetch powershell-yaml $YamlVersion : $($_.Exception.Message)",
+                'Check the network and any proxy, then run this script again.'
+            )
+        }
     }
-    Write-Host ""
-    Write-Host "The powershell-yaml module is needed to read workflow inputs and is not installed." -ForegroundColor Yellow
-    if (-not (Read-YesNo "Install powershell-yaml from the PowerShell Gallery for the current user now?")) {
+
+    # Checked on every run, including against an already cached file. A package
+    # that fails is deleted rather than left where the next run would reuse it.
+    $actual = (Get-FileHash -LiteralPath $pkg -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $YamlSha256) {
+        Remove-Item -LiteralPath $pkg -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $root) {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
         Stop-WithError @(
-            'powershell-yaml is required.',
-            'Install it manually with:  Install-Module powershell-yaml -Scope CurrentUser',
-            'then run this script again.'
+            "powershell-yaml $YamlVersion did not match its recorded hash.",
+            "  expected $YamlSha256",
+            "  got      $actual",
+            'The package has been deleted. Do not run this again until you know why it changed.'
         )
     }
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
-            Write-Info 'Installing the NuGet package provider (one time)...'
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+
+    if (-not (Test-Path -LiteralPath $psd1)) {
+        try { Expand-Archive -LiteralPath $pkg -DestinationPath $root -Force }
+        catch {
+            Stop-WithError @(
+                "Could not unpack powershell-yaml $YamlVersion : $($_.Exception.Message)",
+                "Delete $pkg and $root, then run this script again."
+            )
         }
-        Write-Info 'Installing powershell-yaml...'
-        Install-Module -Name powershell-yaml -Scope CurrentUser -Force -ErrorAction Stop
-        Import-Module powershell-yaml -ErrorAction Stop
-        Write-Ok 'powershell-yaml installed.'
     }
+
+    try { Import-Module -Name $psd1 -Force -ErrorAction Stop }
     catch {
         Stop-WithError @(
-            "Could not install powershell-yaml: $($_.Exception.Message)",
-            'Try running this in PowerShell manually:',
-            '  Install-Module powershell-yaml -Scope CurrentUser',
-            'If PowerShellGet is outdated, first run:',
-            '  Install-Module PowerShellGet -Force -Scope CurrentUser',
-            'then open a new PowerShell window and run this script again.'
+            "Could not import powershell-yaml $YamlVersion : $($_.Exception.Message)",
+            "Delete $root and run this script again to unpack it afresh."
         )
     }
+    Write-Ok "powershell-yaml $YamlVersion verified and loaded."
 }
 
 function Get-YamlKey {

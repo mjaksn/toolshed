@@ -9,7 +9,7 @@ Run the setup script once per workflow. It walks you through picking a repositor
 - Windows with PowerShell 5.1 or later (PowerShell 7 also works)
 - [GitHub CLI](https://cli.github.com) installed and authenticated (`gh auth login`)
 - Write (push) access to the target repository, which GitHub requires for dispatching workflows
-- The [powershell-yaml](https://github.com/cloudbase/powershell-yaml) module. The setup script offers to install it for the current user on first run.
+- The [powershell-yaml](https://github.com/cloudbase/powershell-yaml) module, which the setup script fetches for itself on first run after asking. Nothing is installed: the package is downloaded from the gallery, checked against a SHA256 recorded in the script, unpacked under the temporary directory and imported from there. A copy of powershell-yaml already on the machine is neither used nor disturbed.
 
 ## Setup
 
@@ -93,7 +93,9 @@ If file creation fails part way through, anything already written is removed.
 
 **Not authenticated**: run `gh auth login` and choose GitHub.com. For organizations that use SSO, run `gh auth refresh` and authorize the organization when prompted.
 
-**powershell-yaml will not install**: try `Install-Module powershell-yaml -Scope CurrentUser` manually. On Windows PowerShell 5.1 an outdated PowerShellGet can block installs; update it with `Install-Module PowerShellGet -Force -Scope CurrentUser` and open a new window.
+**powershell-yaml will not download**: the fetch is a plain HTTPS request to the PowerShell Gallery, so a proxy or a blocked host is the usual cause. The package is cached at `%TEMP%\powershell-yaml-<version>.zip`; delete it to force a fresh attempt.
+
+**powershell-yaml did not match its recorded hash**: the script deletes the package and stops rather than using it. That is either a corrupted download, in which case running it again is enough, or the file served for that version has changed, which is worth understanding before retrying. The expected value is the `$YamlSha256` line near the top of `New-WorkflowShortcut.ps1`, and it pins that exact version.
 
 **Workflow has no `workflow_dispatch` trigger**: add the following to the workflow file on the branch you want to run from:
 
