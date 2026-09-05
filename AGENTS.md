@@ -55,7 +55,9 @@ tool is set up by following its own README.
 three stylistic rules for that one file with a reason beside each, and
 `.github/changed_tools.py`, the CI plumbing. It runs repository-wide and
 unconditionally, so any Python that lands is linted on arrival whatever else a
-change touched.
+change touched. CI installs ruff from `.github/requirements-lint.txt`, pinned by
+version and hash, so the same version can be had locally with
+`pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
 `cd dispatch-desk && ./check.ps1` is the one tool check that exists. It runs
 PSScriptAnalyzer over that directory and takes about a minute the first time,
@@ -167,6 +169,12 @@ the shared-library mistake wearing different clothes.
   means `tools` was skipped for want of a matrix rather than for want of work.
   A new job needs deciding into one of those two camps rather than copied into
   whichever line is nearest.
+- **`ruff check .` is not the same check on Windows as it is in CI.** Some
+  rules are about the filesystem rather than the source, and simply do not fire
+  where the concept does not exist. `EXE001`, a shebang on a file without the
+  executable bit, is the one that has already cost a CI run: it passes locally
+  on Windows and fails on the linux runner. A new script with a shebang wants
+  `git update-index --chmod=+x` on it, and a green local lint is not proof.
 - **`shell` refuses an expression, and refuses it loudly.** `runs-on` and
   `working-directory` both take a `matrix` value, so `shell` looks like it
   should too. It does not, and the result is not a job that fails: the workflow

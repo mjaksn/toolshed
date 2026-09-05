@@ -1,0 +1,18 @@
+# ruff, pinned by version and by hash, for the lint job and for anyone who
+# wants the same version locally:
+#
+#     pip install --require-hashes --requirement .github/requirements-lint.txt
+#
+# --require-hashes is the half that matters. Without it pip takes the version
+# and ignores the hashes entirely, which looks identical in a diff and checks
+# nothing.
+#
+# Three files rather than one, because pip verifies whichever it downloads and
+# that depends on the machine: CI is linux on x86_64, this is written on
+# Windows, and the sdist is there for anything else, which will build from
+# source and take a while. A platform not listed here fails with a message
+# about a missing hash rather than quietly installing something unverified.
+ruff==0.16.4 \
+    --hash=sha256:f2d812e482f5a7e02eee26cd73d2a37ebbdf47d795ea63ba1b89110ae93e9fb3 \
+    --hash=sha256:05d9d27a18c4bcbefada602480ec9e01e0bc949d432e0ced5df77edac195919c \
+    --hash=sha256:13171aa9d9af2240ee3504e639de73122c67e74036de5ba2e1d01422cd17e3dc

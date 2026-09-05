@@ -66,7 +66,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: install the tools
-        run: pip install ruff
+        # Pinned by version and by hash, and --require-hashes is what makes the
+        # hashes mean anything. Left off, pip installs the version and verifies
+        # nothing.
+        run: pip install --require-hashes --requirement .github/requirements-lint.txt
       - name: ruff
         # Repository-wide, and unconditional, unlike the per tool checks below.
         # The only Python here is the CI plumbing itself, which every tool
