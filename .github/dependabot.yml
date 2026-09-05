@@ -1,0 +1,19 @@
+version: 2
+
+# Actions only, for now. Nothing here has dependencies of its own yet, and a
+# tool that arrives with a manifest gets its ecosystem added beside this one
+# rather than sharing it: they are separate programs that happen to live in one
+# repository, so a lockfile in one has nothing to say about another.
+#
+# The cooldown is the house rule that no third-party release is used inside
+# seven days of being published.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+    open-pull-requests-limit: 3

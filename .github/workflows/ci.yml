@@ -1,0 +1,66 @@
+name: CI
+
+# Deliberately not on every push. A branch with no pull request open against
+# it runs nothing, and a merge runs the checks once rather than twice:
+#
+#   pull_request       while a change is up for review, re-running on each
+#                      push to it, so what passed is always the code being
+#                      merged.
+#   push to main       after the merge has happened.
+#   workflow_dispatch  on demand, for a run nobody asked for by pushing.
+#
+# The pull_request trigger is what makes a branch protection requirement
+# enforceable, and it is not interchangeable with dispatching by hand. A
+# dispatched run does attach its checks to the branch head commit, but they do
+# not enter the pull request's status check rollup, and the rollup, not the
+# commit, is what a ruleset evaluates. So dispatch is a convenience here, never
+# the gate.
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: install the tools
+        run: pip install ruff
+      - name: ruff
+        # Repository-wide, and it passes vacuously while there is no Python
+        # here. That is the point of seeding it now: the first script to land
+        # is linted the day it lands rather than the day somebody remembers to
+        # wire this up.
+        run: ruff check .
+
+  gate:
+    name: gate
+    # The single check for branch protection to require. Runs whatever the
+    # others did, so a failure upstream is reported here rather than leaving
+    # the gate skipped and the requirement satisfied by default.
+    #
+    # Tools arrive in their own languages and bring their own checks, so this
+    # list is expected to grow a job per language rather than per tool. Add the
+    # job above, add it to `needs`, and add its line here: a job left out of
+    # this step runs and is then ignored, which is worse than not running.
+    if: always()
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: every job must have succeeded
+        run: |
+          echo "lint ${{ needs.lint.result }}"
+          [ "${{ needs.lint.result }}" = "success" ] || exit 1

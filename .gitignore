@@ -1,0 +1,31 @@
+# Python build output and the caches the tools leave behind. Anything here
+# that grows a virtual environment keeps it local, so the environment
+# directories are covered once for the whole repository rather than per tool.
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# Editors.
+.idea/
+.vscode/
+
+# Agent tooling scratch. A worktree is a checkout of this repository living
+# inside it, which git would otherwise try to record as a nested repo, and
+# settings.local.json is per-user. A shared .claude/settings.json is
+# deliberately not ignored, so one can still be committed if ever wanted.
+.claude/worktrees/
+.claude/settings.local.json
+
+# The agent instructions live in AGENTS.md, which is committed and is what
+# every agent reads. CLAUDE.md is only the one-line pointer at it that Claude
+# Code looks for, which is per-user scaffolding rather than part of the
+# project, so it stays out of the repository.
+CLAUDE.md
