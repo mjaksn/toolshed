@@ -2,8 +2,8 @@
 """Work out which tools a change touched, and print them as a CI matrix.
 
 A tool is a top level directory holding a `ci.json`. That file is how a tool
-asks to be checked and says what checking it means: which runner it needs,
-which shell to use, and what to run. Nothing at the root knows anything else
+asks to be checked and says what checking it means: which runner it needs and
+what to run there. Nothing at the root knows anything else
 about any tool, which is the rule the repository is built on, so this walks the
 directories rather than consulting a list that would have to be edited every
 time a tool arrives.
@@ -25,7 +25,7 @@ import subprocess
 import sys
 
 ZERO = "0" * 40
-REQUIRED = ("runner", "shell", "check")
+REQUIRED = ("runner", "check")
 
 
 def git(*args):
@@ -45,7 +45,6 @@ def declared_tools():
         found[manifest.parent.name] = {
             "name": manifest.parent.name,
             "runner": entry["runner"],
-            "shell": entry["shell"],
             "check": entry["check"],
         }
     return found

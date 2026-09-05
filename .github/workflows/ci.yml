@@ -93,8 +93,16 @@ jobs:
         # The command comes out of the tool's ci.json and is run as written.
         # That is the whole point of the arrangement, and it means a ci.json is
         # as much a thing to read in review as the script beside it.
+        #
+        # bash on every runner, Windows included, where it is the git bash that
+        # the image ships. The shell is not a per tool choice because `shell`
+        # is one of the few keys that refuses an expression: a matrix value
+        # here is not a runtime error but a workflow that will not start at
+        # all, which is how this was found. So a tool that wants another
+        # interpreter names it in its own command, which is what running the
+        # check by hand looks like anyway.
         working-directory: ${{ matrix.tool.name }}
-        shell: ${{ matrix.tool.shell }}
+        shell: bash
         run: ${{ matrix.tool.check }}
 
   gate:

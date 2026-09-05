@@ -63,16 +63,16 @@ A tool opts in with a `ci.json` in its directory:
 ```json
 {
   "runner": "windows-latest",
-  "shell": "pwsh",
-  "check": "./check.ps1"
+  "check": "pwsh -File ./check.ps1"
 }
 ```
 
 `runner` is the GitHub hosted runner it needs, which matters here because the
 shed mixes PowerShell on Windows with things that want Linux. `check` runs from
-the tool's own directory and fails the build by exiting non-zero. Running it by
-hand is the same command from the same place, so a check that passes locally is
-the check CI runs.
+the tool's own directory, under bash on every runner, and fails the build by
+exiting non-zero. A tool wanting another interpreter names it in the command,
+as this one does. Running the check by hand is the same command from the same
+place, so a check that passes locally is the check CI runs.
 
 A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the

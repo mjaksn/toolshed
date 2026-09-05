@@ -92,7 +92,7 @@ CI runs one workflow, `.github/workflows/ci.yml`, and it has four jobs.
 `.github/changed_tools.py`, which walks the top level for directories holding a
 `ci.json`, intersects them with the directories the diff touched, and prints
 the survivors as a JSON array of matrix entries. Each entry carries the tool's
-name, the runner it wants, the shell to use and the command to run.
+name, the runner it wants and the command to run there.
 
 `lint` runs `ruff check .` over everything, unconditionally. The only Python
 here is the CI plumbing, which every tool depends on, so it is checked whatever
@@ -106,21 +106,22 @@ when the array is empty.
 
 ### Giving a tool a check
 
-Put a `ci.json` in the tool's directory with three keys:
+Put a `ci.json` in the tool's directory with two keys:
 
 ```json
 {
   "runner": "windows-latest",
-  "shell": "pwsh",
-  "check": "./check.ps1"
+  "check": "pwsh -File ./check.ps1"
 }
 ```
 
-`runner` is a GitHub hosted runner label, `shell` is what the command should be
-run with, and `check` is run from the tool's own directory and must exit
-non-zero on failure. A tool with no `ci.json` is never checked, which is the
-ordinary state for a script with nothing to run against it and not a thing to
-apologise for.
+`runner` is a GitHub hosted runner label. `check` runs from the tool's own
+directory, under bash on every runner, and must exit non-zero on failure. A
+tool wanting another interpreter names it in the command, as the example does,
+because the shell cannot be chosen per tool: see the gotcha below.
+
+A tool with no `ci.json` is never checked, which is the ordinary state for a
+script with nothing to run against it and not a thing to apologise for.
 
 Nothing in the workflow knows the name of any tool, and adding one must not
 require editing it. If a change to CI would need a tool named in the root, that
@@ -166,6 +167,12 @@ the shared-library mistake wearing different clothes.
   means `tools` was skipped for want of a matrix rather than for want of work.
   A new job needs deciding into one of those two camps rather than copied into
   whichever line is nearest.
+- **`shell` refuses an expression, and refuses it loudly.** `runs-on` and
+  `working-directory` both take a `matrix` value, so `shell` looks like it
+  should too. It does not, and the result is not a job that fails: the workflow
+  does not start at all, and the run says only that there is a file issue, with
+  no annotation naming the line. That is why the per tool declaration carries a
+  runner but not a shell. See actions/runner#444.
 
 ## Out of bounds
 
