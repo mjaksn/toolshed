@@ -48,12 +48,14 @@ tool is set up by following its own README.
 | Format | none configured |
 | Run | per tool, see its README |
 
-`ruff check .` was run in this checkout: it reports `warning: No Python files
-found under the given path(s)` and passes, which says only that no Python has
-arrived yet rather than that anything was checked. CI runs the same command, so
-the first Python file to land is linted on arrival. Nothing lints the PowerShell
-in here, which is a real gap rather than a decision: a PSScriptAnalyzer job
-needs the module pinned by version and hash first.
+`ruff check .` was run in this checkout and passes. It now checks something:
+`apitrace/apitrace.py` is the only Python here so far, and it carries its own
+`apitrace/ruff.toml` switching off three stylistic rules for that one file, each
+with its reason written beside it. CI runs the same command, so any Python that
+lands is linted on arrival.
+
+Nothing lints the PowerShell in here, which is a real gap rather than a
+decision.
 
 Every command in this table has been run in this repo and its output verified.
 If one is added without running it, mark it `UNVERIFIED` rather than implying
