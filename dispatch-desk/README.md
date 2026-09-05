@@ -109,6 +109,27 @@ on:
         default: hello
 ```
 
+## Checks
+
+`./check.ps1` runs PSScriptAnalyzer over this directory. It needs PowerShell
+7.4 or later, which is the analyzer's own floor and higher than the 5.1 the
+tool itself supports, so it is a thing for whoever is editing the script rather
+than for whoever is running it.
+
+The module is fetched from the gallery as a package file, checked against a
+SHA256 recorded in `check.ps1`, and imported from where it was unpacked. It is
+never installed, because `Install-Module -RequiredVersion` pins the version and
+verifies nothing about what arrives.
+
+`PSScriptAnalyzerSettings.psd1` turns three rules off, each with its reason
+written beside it. The one worth knowing about is `PSAvoidUsingWriteHost`: the
+console is this program's entire user interface, so `Write-Host` is the right
+call here and the rule fires thirty six times saying otherwise.
+
+The analyzer sees only the setup script. The runtime script it generates lives
+in a here-string, which is a string as far as PowerShell is concerned, so
+nothing checks that half. Read it with that in mind.
+
 ## History
 
 This tool was its own repository, [mjaksn/dispatch-desk](https://github.com/mjaksn/dispatch-desk),

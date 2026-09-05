@@ -1,0 +1,5 @@
+{
+  "runner": "windows-latest",
+  "shell": "pwsh",
+  "check": "./check.ps1"
+}
