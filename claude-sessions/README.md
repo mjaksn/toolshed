@@ -156,6 +156,12 @@ first. It is free if it turns out not to be required.
   copying anywhere else that registers a task.
 - **A newly registered task reports `LastTaskResult` 267011,** which is
   `SCHED_S_TASK_HAS_NOT_RUN` and not a failure. `-Status` says so rather than warning.
+- **The launch path has not been run against a directory whose name contains a
+  space.** Windows Terminal parses its own command line and then tokenises the trailing
+  command again, so `-d` with such a path is the most likely thing to break first. Every
+  restore test so far was a dry run, and none of the working directories involved had a
+  space in it. Use `-Separate`, which goes through `Start-Process` instead, if a restore
+  opens a console in the wrong place.
 - **The task only runs while you are logged on,** by design. Process start times and
   the session registry both belong to the logged-on user, so a task configured to run
   whether or not the user is present would see nothing useful.
