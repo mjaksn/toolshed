@@ -9,9 +9,9 @@ a repository of its own goes in here.
 
 ## What is in here
 
-- [apitrace](apitrace/), a Win32 API call tracer in pure ctypes, the Windows
-  analogue of strace: it launches a program as a debuggee and logs the calls it
-  makes into the DLLs you select.
+- [apitrace](apitrace/), a Win32 API call tracer, the Windows analogue of strace:
+  it launches a program as a debuggee and logs the calls it makes into the DLLs
+  you select. In C and in Python, the same program twice.
 - [claude-sessions](claude-sessions/), PowerShell scripts that record which Claude
   Code sessions are open in a console window and reopen them after a reboot.
 - [dispatch-desk](dispatch-desk/), a PowerShell script that creates Windows

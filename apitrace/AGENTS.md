@@ -1,22 +1,29 @@
 # AGENTS.md
 
-Guidance for working on **apitrace.py**, a self-contained Win32 API call tracer
-written in pure `ctypes`. Read this before editing: several things here look
-harmless to change but silently corrupt the debugger.
+Guidance for working on **apitrace**, a self-contained Win32 API call tracer.
+Read this before editing: several things here look harmless to change but
+silently corrupt the debugger.
 
-[README.md](README.md) covers what the tool is and how to run it. This file is
-about changing it.
+There are two implementations of the same program. `apitrace.c` is the original
+and `apitrace.py` is a port of it. The architecture below describes both, using
+the Python's function names; the C has the same shape under C spellings. Each
+invariant says which file it binds.
+
+[README.md](README.md) covers what the tool is, how to build the C one, how to
+run either, and where the two differ in behaviour. This file is about changing
+them.
 
 ## What this is
 
-A single-file, dependency-free Python program that traces a Windows process the
-way `strace` traces a Linux one. It launches a target as a debuggee, plants
-software breakpoints (`INT3` / `0xCC`) on the entry point of every *exported*
-function in selected DLLs, and logs each call (thread, `MODULE!Function`, return
-address, first few argument slots) before transparently stepping over the
-breakpoint and re-arming it.
+A single-file, dependency-free program that traces a Windows process the way
+`strace` traces a Linux one. It launches a target as a debuggee, plants software
+breakpoints (`INT3` / `0xCC`) on the entry point of every *exported* function in
+selected DLLs, and logs each call (thread, `MODULE!Function`, return address,
+first few argument slots) before transparently stepping over the breakpoint and
+re-arming it.
 
-There is no build step. `apitrace.py` is the whole project.
+Each file is the whole program on its own. The Python has no build step; the C
+is one translation unit and needs no makefile.
 
 ## Architecture (control flow)
 
@@ -39,7 +46,12 @@ Global state lives in module-level `g_*` dicts/flags: `g_hProc`, `g_bp`
 ## Invariants that must not break
 
 These are the load-bearing details. Each has caused, or would cause, a
-hard-to-diagnose failure.
+hard-to-diagnose failure. Invariants 1 to 3 exist because of how `ctypes` binds
+to Win32 and apply to `apitrace.py` alone; a C compiler enforces the same things
+by itself. Invariant 4 applies to the Python, since `windows.h` already gets the
+layout right. Invariants 5 to 10 are about the debugging method and bind both
+files equally: breaking one of those in the C is the same failure as breaking it
+in the Python.
 
 1. **Every kernel32 function needs `argtypes` + `restype`.** Set in
    `init_win()`. Without them ctypes assumes C `int` args and truncates 64-bit
@@ -99,9 +111,10 @@ of `apitrace.py`, the README, and this section together.
 - **Only exported functions are visible.** Fundamental to breakpoint-on-export
   tracing.
 - **Software-breakpoint multithreading race.** Between restoring the original
-  byte and re-arming, another thread could execute that address unlogged. See
-  the footer of `apitrace.py` for the fix (suspend sibling threads during the
-  step) and the alternative (inline trampoline hooks via frida/Detours/MinHook).
+  byte and re-arming, another thread could execute that address unlogged. Both
+  files carry the same note in their footer: the fix is suspending sibling
+  threads during the step, and the alternative is inline trampoline hooks via
+  frida, Detours or MinHook.
 - **Slow.** Every hooked call round-trips through this debugger.
 
 ## Extension points
@@ -114,12 +127,26 @@ of `apitrace.py`, the README, and this section together.
   its own `hProcess`; `g_hProc` currently assumes one target).
 - **New Win32 calls:** prototype in `init_win()` (invariant 1) before use.
 
+## Keeping the two in step
+
+They are a port and its original, not two tools that happen to be similar. A
+change to what either one traces or prints belongs in both, and the README's
+table of differences is the record of where that has not happened. If you change
+one and not the other, add the row rather than leaving it to be discovered.
+
+The differences already recorded there are real and were found by reading and
+running both, not assumed: `CreateProcessA` against `CreateProcessW`, the fixed
+256-byte export-name read against a shrinking one, the WOW64 single-step code,
+the fixed command line buffer, and the exit status on an unknown option.
+
 ## Style
 
-Plain stdlib + `ctypes`, no third-party deps, and keep it that way so the file
-stays copy-and-run. Match the existing naming: `g_*` for globals, snake_case
-functions, Windows type aliases (`DWORD`, `HANDLE`, ...) at the top.
+Plain stdlib, no third-party deps in either file, and keep it that way so both
+stay copy-and-run. Match the existing naming: `g_*` for globals, snake_case
+functions, Windows type aliases (`DWORD`, `HANDLE`, ...) at the top. That naming
+came from the C and the Python kept it, which is why the two read alike.
 
-The file is committed byte for byte as written. `ruff.toml` here disables three
-stylistic rules for it rather than reformatting working code; the reasoning is in
-that file. If you make a real change, keep the diff to the change.
+Both files are committed byte for byte as written. `ruff.toml` here disables
+three stylistic rules for the Python rather than reformatting working code; the
+reasoning is in that file. Nothing lints the C, so a `/W4` build is the only
+check it has. If you make a real change, keep the diff to the change.
