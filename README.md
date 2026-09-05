@@ -9,6 +9,8 @@ a repository of its own goes in here.
 
 ## What is in here
 
+- [claude-sessions](claude-sessions/), PowerShell scripts that record which Claude
+  Code sessions are open in a console window and reopen them after a reboot.
 - [dispatch-desk](dispatch-desk/), a PowerShell script that creates Windows
   desktop shortcuts, each one dispatching a GitHub Actions workflow and then
   watching the run through to its conclusion.
