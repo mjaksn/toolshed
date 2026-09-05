@@ -1,9 +1,13 @@
 version: 2
 
-# Actions only, for now. Nothing here has dependencies of its own yet, and a
-# tool that arrives with a manifest gets its ecosystem added beside this one
-# rather than sharing it: they are separate programs that happen to live in one
-# repository, so a lockfile in one has nothing to say about another.
+# The CI plumbing and nothing else: the actions the workflow calls, and the
+# ruff pin the lint job installs. Both are root scaffolding rather than any
+# tool's dependency.
+#
+# A tool that arrives with a manifest of its own gets its ecosystem added
+# beside these, pointed at that tool's directory, rather than sharing one:
+# they are separate programs that happen to live in one repository, so a
+# lockfile in one has nothing to say about another.
 #
 # The cooldown is the house rule that no third-party release is used inside
 # seven days of being published.
@@ -12,6 +16,23 @@ updates:
     directory: "/"
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+    open-pull-requests-limit: 3
+
+  # ruff, pinned by version and hash in .github/requirements-lint.txt.
+  # Dependabot rewrites the --hash lines along with the version, which is the
+  # only thing that keeps a hash pin from being a pin that never moves again.
+  #
+  # Not every pin in this repository has that. PSScriptAnalyzer is pinned in
+  # dispatch-desk/check.ps1 as a version and a SHA256 in two variables, which
+  # nothing here can see and which has to be raised by hand.
+  - package-ecosystem: pip
+    directory: "/.github"
+    schedule:
+      interval: weekly
     cooldown:
       default-days: 7
     commit-message:

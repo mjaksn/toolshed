@@ -112,9 +112,11 @@ on:
 ## Checks
 
 `./check.ps1` runs PSScriptAnalyzer over this directory. It needs PowerShell
-7.4 or later, which is the analyzer's own floor and higher than the 5.1 the
+7.4.6 or later, which is the analyzer's own floor and well above the 5.1 the
 tool itself supports, so it is a thing for whoever is editing the script rather
-than for whoever is running it.
+than for whoever is running it. The `#Requires` line in `check.ps1` says 7.4,
+because `#Requires` cannot express a patch version; below 7.4.6 the module
+raises its own error saying so.
 
 The module is fetched from the gallery as a package file, checked against a
 SHA256 recorded in `check.ps1`, and imported from where it was unpacked. It is
