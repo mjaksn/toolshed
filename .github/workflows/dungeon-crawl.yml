@@ -1,0 +1,210 @@
+name: Dungeon Crawl
+
+# A fixture for testing dispatch-desk by hand, and nothing else. It declares one
+# input of every kind workflow_dispatch supports, twice over, one required and
+# one optional, so every path through dispatch-desk's prompting can be tried
+# against something that actually runs. The job then descends a dungeon one room
+# per second, which is trivial work with a pause in it, and prints a different
+# line for every room.
+#
+# The log is an injective function of the inputs. The first step prints every
+# input verbatim as JSON, so two different sets of inputs cannot produce the same
+# log whatever the dungeon does afterwards. That is the property; the dungeon is
+# decoration. One limit is GitHub's rather than this file's: an optional input
+# left unset arrives as its default, indistinguishable from the same value typed
+# in, so the function is injective over what GitHub delivers.
+#
+# Inputs never appear inline in a run: block. They go through env:, quoted, so a
+# hero named $(rm -rf /) is a hero named that and nothing more. This is a workflow
+# for testing an input-handling tool. Someone will type that.
+#
+# The two environment inputs need environments to pick from. the-undercroft and
+# the-tavern exist in this repository for that reason alone, with no protection
+# rules, so choosing one does not stall the run waiting for an approval.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rooms:
+        description: How many rooms to descend through. A whole number, 0 to 120.
+        type: number
+        required: true
+      torches:
+        description: Torches carried in. One burns out per room.
+        type: number
+        required: false
+        default: 3
+      hero:
+        description: Who is going down there.
+        type: string
+        required: true
+      familiar:
+        description: A companion, if any. Leave empty to go alone.
+        type: string
+        required: false
+      hardcore:
+        description: No respawns. The prose gets less reassuring.
+        type: boolean
+        required: true
+      map_found:
+        description: Whether the hero found the map in the tavern first.
+        type: boolean
+        required: false
+        default: false
+      hero_class:
+        description: What the hero is good at.
+        type: choice
+        required: true
+        options:
+          - wizard
+          - rogue
+          - bard
+      difficulty:
+        description: How awake the monsters are.
+        type: choice
+        required: false
+        default: normal
+        options:
+          - gentle
+          - normal
+          - brutal
+      dungeon:
+        description: Which dungeon. The job runs in this environment.
+        type: environment
+        required: true
+      tavern:
+        description: Where the hero wakes up if it goes badly. Optional, and irrelevant on hardcore.
+        type: environment
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  descend:
+    name: descend
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.dungeon }}
+    env:
+      ROOMS: ${{ inputs.rooms }}
+      TORCHES: ${{ inputs.torches }}
+      HERO: ${{ inputs.hero }}
+      FAMILIAR: ${{ inputs.familiar }}
+      HARDCORE: ${{ inputs.hardcore }}
+      MAP_FOUND: ${{ inputs.map_found }}
+      HERO_CLASS: ${{ inputs.hero_class }}
+      DIFFICULTY: ${{ inputs.difficulty }}
+      DUNGEON: ${{ inputs.dungeon }}
+      TAVERN: ${{ inputs.tavern }}
+    steps:
+      - name: read the manifest
+        # Every input, verbatim. This step alone makes the log injective.
+        env:
+          INPUTS_JSON: ${{ toJSON(inputs) }}
+        run: |
+          echo "The party's manifest, exactly as it was handed across the tavern bar:"
+          echo "$INPUTS_JSON"
+
+      - name: check the arithmetic
+        # A number input accepts 2.5 and -3. Neither is a number of rooms.
+        run: |
+          if ! [[ "$ROOMS" =~ ^[0-9]+$ ]]; then
+            echo "::error::rooms must be a whole number, not '$ROOMS'. Half a room is a wall."
+            exit 1
+          fi
+          if (( ROOMS > 120 )); then
+            echo "::error::rooms is $ROOMS, and nobody has come back from more than 120. Refusing to try."
+            exit 1
+          fi
+          if ! [[ "$TORCHES" =~ ^[0-9]+$ ]]; then
+            echo "::error::torches must be a whole number, not '$TORCHES'. You cannot carry part of a torch."
+            exit 1
+          fi
+          echo "$ROOMS rooms, $TORCHES torches. The arithmetic holds."
+
+      - name: descend
+        run: |
+          rooms=(
+            "a damp antechamber where every torch bracket is empty"
+            "a hall of pillars, one of which is breathing"
+            "a kitchen abandoned mid-meal, the soup still warm"
+            "a library in which every book is the same book"
+            "a flooded crypt, ankle deep and rising"
+            "a chapel to a god with too many elbows"
+            "an armoury of swords too small for any hand"
+            "a chasm crossed by a bridge made of held breath"
+            "a throne room with the throne facing the wall"
+            "a nursery, and the less said about it the better"
+          )
+
+          case "$HERO_CLASS" in
+            wizard) does="reads the runes on the wall and mispronounces one" ;;
+            rogue)  does="checks the floor for pressure plates and finds two" ;;
+            bard)   does="composes a verse about the smell" ;;
+            *)      does="stands there being a $HERO_CLASS, whatever that involves" ;;
+          esac
+
+          case "$DIFFICULTY" in
+            gentle) mood="the monsters are asleep" ;;
+            normal) mood="the monsters are awake" ;;
+            brutal) mood="the monsters have been expecting you" ;;
+            *)      mood="the monsters are $DIFFICULTY, apparently" ;;
+          esac
+
+          if [[ -n "$FAMILIAR" ]]; then
+            party="$HERO the $HERO_CLASS, with $FAMILIAR"
+          else
+            party="$HERO the $HERO_CLASS, alone"
+          fi
+
+          echo "$party enters $DUNGEON, where $mood."
+          if [[ "$MAP_FOUND" == "true" ]]; then
+            echo "The map from the tavern says there are $ROOMS rooms. The map is right."
+          fi
+          if [[ "$HARDCORE" == "true" ]]; then
+            echo "Hardcore. There is no waking up anywhere."
+          elif [[ -n "$TAVERN" ]]; then
+            echo "If it goes badly, $HERO wakes up in $TAVERN with a headache."
+          else
+            echo "If it goes badly, $HERO wakes up somewhere unspecified, which is worse."
+          fi
+
+          torches=$TORCHES
+          for (( i = 1; i <= ROOMS; i++ )); do
+            desc="${rooms[$(( (i - 1) % ${#rooms[@]} ))]}"
+            depth=$(( i * 3 ))
+            if (( torches > 0 )); then
+              torches=$(( torches - 1 ))
+              if (( torches == 0 )); then light="the last torch gutters out"
+              elif (( torches == 1 )); then light="1 torch left"
+              else light="$torches torches left"; fi
+            else
+              light="in the dark"
+            fi
+            echo "Room $i of $ROOMS, ${depth}m down: $desc. $HERO $does. ($light)"
+            sleep 1
+          done
+
+          if (( ROOMS == 0 )); then
+            echo "$HERO looks down the stairs, thinks better of it, and goes back to the tavern."
+          else
+            echo "$HERO climbs back out after $ROOMS rooms and $(( ROOMS * 3 ))m of stairs, blinking."
+          fi
+
+      - name: carve it on the wall
+        # A summary for whoever dispatched this, since dispatch-desk hands them
+        # the run URL and this is what they will see first.
+        run: |
+          {
+            echo "## $HERO the $HERO_CLASS went into $DUNGEON"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| rooms | $ROOMS |"
+            echo "| torches in | $TORCHES |"
+            echo "| familiar | ${FAMILIAR:-none} |"
+            echo "| hardcore | $HARDCORE |"
+            echo "| map found | $MAP_FOUND |"
+            echo "| difficulty | $DIFFICULTY |"
+            echo "| tavern | ${TAVERN:-none} |"
+          } >> "$GITHUB_STEP_SUMMARY"

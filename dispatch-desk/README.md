@@ -142,3 +142,20 @@ nothing checks that half. Read it with that in mind.
 This tool was its own repository, [mjaksn/dispatch-desk](https://github.com/mjaksn/dispatch-desk),
 until it moved into the shed. The commits it had before the move are still
 there, so that is where to look for why something is the way it is.
+
+## A workflow to test it against
+
+[`.github/workflows/dungeon-crawl.yml`](../.github/workflows/dungeon-crawl.yml) exists
+so this tool has something real to be pointed at. It declares one required and one
+optional input of every type `workflow_dispatch` supports, which is `string`, `number`,
+`boolean`, `choice` and `environment`, so each of the prompting paths in the setup
+script can be exercised without inventing a workflow each time. The two environments it
+offers, `the-undercroft` and `the-tavern`, exist in this repository for that reason
+alone and carry no protection rules.
+
+Set the shortcut up against it with `toolshed` as the repository and `Dungeon Crawl`
+as the workflow, once this file is on `main`, since GitHub only registers a
+`workflow_dispatch` workflow from the default branch. A run descends one room per second, so `rooms` is also how long you
+want to watch `gh run watch` stream for. Anything that is not a whole number from 0
+to 120 fails the run on purpose, with a message saying why, which is a useful thing
+to try from the shortcut too.
