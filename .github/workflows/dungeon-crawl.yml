@@ -10,9 +10,16 @@ name: Dungeon Crawl
 # The log is an injective function of the inputs. The first step prints every
 # input verbatim as JSON, so two different sets of inputs cannot produce the same
 # log whatever the dungeon does afterwards. That is the property; the dungeon is
-# decoration. One limit is GitHub's rather than this file's: an optional input
-# left unset arrives as its default, indistinguishable from the same value typed
-# in, so the function is injective over what GitHub delivers.
+# decoration.
+#
+# One limit is GitHub's rather than this file's, and it was measured on real runs
+# rather than assumed. An optional input with a default arrives as that default
+# whether it was left unset or typed in as the same value. An optional input with
+# no default is dropped from toJSON(inputs) altogether when unset, and an explicit
+# empty string is dropped exactly the same way, so those two cannot be told apart
+# either: a run with familiar omitted and a run with familiar sent as "" produce
+# the same manifest. Within that equivalence the log is injective over what
+# GitHub delivers, which is the most any workflow can offer.
 #
 # Inputs never appear inline in a run: block. They go through env:, quoted, so a
 # hero named $(rm -rf /) is a hero named that and nothing more. This is a workflow
