@@ -78,7 +78,7 @@ Set TheSQLCMDFileToExecute=%TEMP%\SQLCMDFile_delete_local_edfi.sql
 
 (
 echo|set /p=" EXEC sp_MSforeachdb 'IF DB_ID(''?'') > 4 AND ''[?]'' LIKE ''+[EdFi%%'' ESCAPE ''+'' BEGIN EXEC (''ALTER DATABASE [?] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [?]'' ) END';"
-) > %TheSQLCMDFileToExecute% 
+) > %TheSQLCMDFileToExecute%
 
 sqlcmd -s localhost -y 0 -i %TheSQLCMDFileToExecute%
 
@@ -88,5 +88,5 @@ echo [32mdone[0m
 
 :END
 echo.
-pause 
+pause
 endlocal
