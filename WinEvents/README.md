@@ -71,6 +71,6 @@ gets.
 ## State
 
 Finished as a learning exercise and not maintained since. It is committed as it
-was written, apart from one blank line removed to satisfy the shed's linter. The
-rules that linter is not applying to it, and why, are written out in
-`ruff.toml`.
+was written, apart from one blank line removed to satisfy the shed's linter and
+a final newline added to each file to satisfy its `.editorconfig`. The rules
+that linter is not applying to it, and why, are written out in `ruff.toml`.

@@ -139,9 +139,9 @@ nothing checks that half. Read it with that in mind.
 
 ## History
 
-This tool was its own repository, [mjaksn/dispatch-desk](https://github.com/mjaksn/dispatch-desk),
-until it moved into the shed. The commits it had before the move are still
-there, so that is where to look for why something is the way it is.
+This tool was its own repository until it moved into the shed, and that
+repository has since been deleted. The commits it had before the move did not
+come with it, so the history here starts at the move.
 
 ## A workflow to test it against
 
