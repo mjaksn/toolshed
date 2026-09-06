@@ -72,8 +72,12 @@ jobs:
         run: pip install --require-hashes --requirement .github/requirements-lint.txt
       - name: ruff
         # Repository-wide, and unconditional, unlike the per tool checks below.
-        # The only Python here is the CI plumbing itself, which every tool
-        # depends on, so it is checked whatever a change touched.
+        # Some of what it covers is the CI plumbing, which every tool depends
+        # on and which therefore has to be checked whatever a change touched.
+        # The rest is whatever Python the tools have brought with them: ruff
+        # resolves configuration per file against the nearest config in its
+        # ancestors, so a tool with its own ruff.toml is linted on its own
+        # terms by this one command.
         run: ruff check .
 
   tools:

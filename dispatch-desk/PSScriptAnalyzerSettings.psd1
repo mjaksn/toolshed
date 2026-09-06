@@ -8,7 +8,8 @@
         # The console is the entire user interface. This program exists to
         # print a numbered list, colour a warning and ask a question, so
         # Write-Host is the correct call rather than a lapse, and the rule
-        # fires thirty six times saying otherwise.
+        # fires thirty nine times across this directory saying otherwise,
+        # thirty six of them in the setup script and three in check.ps1.
         'PSAvoidUsingWriteHost',
 
         # Get-WorkflowDispatchInputs returns every input a workflow declares.

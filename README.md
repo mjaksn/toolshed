@@ -80,7 +80,9 @@ workflow finds the tools by looking, never from a list.
 
 `dispatch-desk` is the one tool with a check so far. It runs PSScriptAnalyzer,
 fetched from the gallery and verified against a recorded hash rather than
-installed, so what the check ran against is the same module every time.
+installed, so what the check ran against is the same module every time. That is
+the same arrangement the tool already uses for powershell-yaml at run time, and
+for the same reason.
 
 ## Licence
 

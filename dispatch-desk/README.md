@@ -118,15 +118,20 @@ than for whoever is running it. The `#Requires` line in `check.ps1` says 7.4,
 because `#Requires` cannot express a patch version; below 7.4.6 the module
 raises its own error saying so.
 
-The module is fetched from the gallery as a package file, checked against a
-SHA256 recorded in `check.ps1`, and imported from where it was unpacked. It is
+PSScriptAnalyzer is fetched from the gallery as a package file, checked against
+a SHA256 recorded in `check.ps1`, and imported from where it was unpacked. It is
 never installed, because `Install-Module -RequiredVersion` pins the version and
-verifies nothing about what arrives.
+verifies nothing about what arrives. That is the same arrangement the tool uses
+for powershell-yaml at run time, and raising either version means replacing a
+version and a hash together.
 
 `PSScriptAnalyzerSettings.psd1` turns three rules off, each with its reason
 written beside it. The one worth knowing about is `PSAvoidUsingWriteHost`: the
 console is this program's entire user interface, so `Write-Host` is the right
-call here and the rule fires thirty six times saying otherwise.
+call here, and the rule fires thirty nine times across this directory saying
+otherwise. `check.ps1` passes that file to the analyzer explicitly rather than
+relying on it being found, which the analyzer would do anyway for a file of that
+name, because a check should say what it is checking against.
 
 The analyzer sees only the setup script. The runtime script it generates lives
 in a here-string, which is a string as far as PowerShell is concerned, so
