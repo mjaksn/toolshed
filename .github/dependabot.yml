@@ -28,10 +28,10 @@ updates:
   #
   # Not every pin in this repository has that. The PowerShell Gallery modules,
   # powershell-yaml in dispatch-desk/New-WorkflowShortcut.ps1 and
-  # PSScriptAnalyzer in both dispatch-desk/check.ps1 and RemoveNewline/check.ps1,
-  # are each pinned as a version and a SHA256 in a pair of variables. There is
-  # no manifest for Dependabot to read, so all of them have to be raised by
-  # hand, and the two analyzer pins move together.
+  # PSScriptAnalyzer in dispatch-desk/check.ps1 and again in
+  # RemoveNewline/check.ps1, are each pinned as a version and a SHA256 in a
+  # pair of variables. There is no manifest for Dependabot to read, so all of
+  # them have to be raised by hand, and the two analyzer pins move together.
   - package-ecosystem: pip
     directory: "/.github"
     schedule:
