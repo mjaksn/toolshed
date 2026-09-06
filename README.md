@@ -17,6 +17,9 @@ a repository of its own goes in here.
 - [dispatch-desk](dispatch-desk/), a PowerShell script that creates Windows
   desktop shortcuts, each one dispatching a GitHub Actions workflow and then
   watching the run through to its conclusion.
+- [EdfiScripts](EdfiScripts/), simple batch scripts providing basic automation of
+  common tasks when doing local Ed-Fi ODS platform development, and very possibly
+  outdated now.
 
 ## What belongs here
 
