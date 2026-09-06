@@ -26,11 +26,12 @@ updates:
   # Dependabot rewrites the --hash lines along with the version, which is the
   # only thing that keeps a hash pin from being a pin that never moves again.
   #
-  # Not every pin in this repository has that. The two PowerShell Gallery
-  # modules, powershell-yaml in dispatch-desk/New-WorkflowShortcut.ps1 and
-  # PSScriptAnalyzer in dispatch-desk/check.ps1, are each pinned as a version
-  # and a SHA256 in a pair of variables. There is no manifest for Dependabot to
-  # read, so both have to be raised by hand.
+  # Not every pin in this repository has that. The PowerShell Gallery modules,
+  # powershell-yaml in dispatch-desk/New-WorkflowShortcut.ps1 and
+  # PSScriptAnalyzer in both dispatch-desk/check.ps1 and RemoveNewline/check.ps1,
+  # are each pinned as a version and a SHA256 in a pair of variables. There is
+  # no manifest for Dependabot to read, so all of them have to be raised by
+  # hand, and the two analyzer pins move together.
   - package-ecosystem: pip
     directory: "/.github"
     schedule:

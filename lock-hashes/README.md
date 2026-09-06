@@ -44,9 +44,9 @@ to reach `pypi.org`.
 
 ## Using it here
 
-The shed's own hash-pinned files were made this way, and `--check` over them
-is the way to see that they still match what the index holds. From the root,
-for the ruff pin the lint job installs:
+The shed's own hash-pinned files are in this form, and `--check` over them is
+the way to see that they still match what the index holds. From the root, for
+the ruff pin the lint job installs:
 
 ```
 python lock-hashes/lock_hashes.py --check .github/requirements-lint.txt
