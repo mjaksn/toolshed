@@ -64,7 +64,13 @@ def touched(base, head):
         git("cat-file", "-e", f"{base}^{{commit}}")
     except subprocess.CalledProcessError:
         return None
-    changed = git("diff", "--name-only", base, head).splitlines()
+    # Three dots, not two. A two-dot diff between the base branch's tip and the
+    # head compares the two commits directly, so on a branch that is behind its
+    # base every tool the base gained since the branch point comes back as
+    # "changed" and is checked for nothing. Three dots diffs from the merge base,
+    # which is what a pull request actually changes. On a fast-forward push the
+    # merge base is the old tip and the two forms agree.
+    changed = git("diff", "--name-only", f"{base}...{head}").splitlines()
     return {path.split("/", 1)[0] for path in changed if "/" in path}
 
 
