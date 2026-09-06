@@ -94,8 +94,7 @@ space before the dots, the space stays on the key. `pwrstat -config` is written
 that way throughout, so most keys under `UPS Configuration` carry one, while
 `UPS State` has none because its dots run straight on from the label. It is
 preserved deliberately: removing it would be a silent break for anything reading
-the old endpoint. There is a test pinning it. Say the word if you would rather
-have clean keys and I will add it as an option.
+the old endpoint. There is a test pinning it.
 
 ## Differences from the PHP
 

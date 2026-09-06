@@ -50,19 +50,24 @@ tool is set up by following its own README.
 | Format | none configured |
 | Run | per tool, see its README |
 
-`ruff check .` was run in this checkout and passes. It covers two things now:
-`apitrace/apitrace.py`, which carries its own `apitrace/ruff.toml` switching off
-three stylistic rules for that one file with a reason beside each, and
-`.github/changed_tools.py`, the CI plumbing. It runs repository-wide and
-unconditionally, so any Python that lands is linted on arrival whatever else a
-change touched. CI installs ruff from `.github/requirements-lint.txt`, pinned by
-version and hash, so the same version can be had locally with
+`ruff check .` was run in this checkout and passes. It covers three places
+now: `apitrace/apitrace.py`, which carries its own `apitrace/ruff.toml`
+switching off three stylistic rules for that one file with a reason beside
+each; the two files in `WinEvents`, which carry a `WinEvents/ruff.toml` of the
+same kind; and `.github/changed_tools.py`, the CI plumbing. It runs
+repository-wide and unconditionally, so any Python that lands is linted on
+arrival whatever else a change touched. CI installs ruff from
+`.github/requirements-lint.txt`, pinned by version and hash, so the same
+version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-`cd dispatch-desk && ./check.ps1` is the one tool check that exists. It runs
+Three tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and takes about a minute the first time,
 because it fetches the module, and seconds afterwards from the cache. It passes
-with nothing reported.
+with nothing reported. `cd BasicUpsAdapter && bash ./check.sh` runs the Node
+test suite with nothing to install, and `cd WinEvents && bash ./check.sh`
+installs the pinned test dependencies and runs pytest; the second is Windows
+only, because pywin32 is. Both were run in this checkout and pass.
 
 The PowerShell in `claude-sessions` is not linted, because that tool has no
 `ci.json`. That is a gap rather than a decision, and closing it is a matter of
@@ -96,9 +101,11 @@ CI runs one workflow, `.github/workflows/ci.yml`, and it has four jobs.
 the survivors as a JSON array of matrix entries. Each entry carries the tool's
 name, the runner it wants and the command to run there.
 
-`lint` runs `ruff check .` over everything, unconditionally. The only Python
-here is the CI plumbing, which every tool depends on, so it is checked whatever
-a change touched.
+`lint` runs `ruff check .` over everything, unconditionally. Some of what it
+covers is the CI plumbing, which every tool depends on, so it has to be checked
+whatever a change touched; the rest is whatever Python the tools have brought
+with them, each linted on its own terms through the `ruff.toml` in its
+directory.
 
 `tools` takes that array as its matrix, so it runs once per changed tool, on
 that tool's own runner, from that tool's own directory. It does not run at all

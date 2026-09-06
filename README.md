@@ -87,11 +87,15 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-`dispatch-desk` is the one tool with a check so far. It runs PSScriptAnalyzer,
+Three tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer,
 fetched from the gallery and verified against a recorded hash rather than
 installed, so what the check ran against is the same module every time. That is
 the same arrangement the tool already uses for powershell-yaml at run time, and
-for the same reason.
+for the same reason. `BasicUpsAdapter` runs its own test suite under
+`node --test`, with nothing to install first. `WinEvents` installs its test
+dependencies, pinned by version and hash, and runs `pytest`. Each of the last
+two keeps the command in a `check.sh` beside its `ci.json`, so the check CI runs
+is one a person can run too.
 
 ## Licence
 

@@ -2,9 +2,10 @@
 # nearest config in its ancestors, so this applies to the two files here and leaves the
 # rest of the shed on the defaults.
 #
-# Both files are committed as written, the one exception being a single blank line
-# removed from `test_event_viewer.py` so that I001 could be satisfied rather than
-# ignored. This was a finished learning exercise rather than a tool under development,
+# Both files are committed as written, apart from a single blank line removed from
+# `test_event_viewer.py` so that I001 could be satisfied rather than ignored, and a
+# final newline added to each so that the repository's `.editorconfig` holds for them.
+# This was a finished learning exercise rather than a tool under development,
 # and rewriting working code that talks to the Win32 event log API to satisfy a style
 # preference would risk the behaviour for no gain. Each ignore below is a decision
 # rather than a rule nobody looked at. If any of them stops being true, delete the line
