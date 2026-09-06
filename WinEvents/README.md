@@ -64,6 +64,10 @@ python -m pytest
 anywhere the imports resolve and do not need a real event log or administrator
 rights.
 
+`check.sh` runs exactly those two commands and is what CI runs, on
+`windows-latest`, per `ci.json`. Running it by hand is the same check the branch
+gets.
+
 ## State
 
 Finished as a learning exercise and not maintained since. It is committed as it
