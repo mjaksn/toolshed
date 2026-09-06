@@ -151,12 +151,15 @@ the shared-library mistake wearing different clothes.
 ## Gotchas
 
 - **Line endings are set per language, not per repository.** `.gitattributes`
-  gives PowerShell and batch files CRLF, holds shell, Python and Markdown at
-  LF, and leaves everything else to `text=auto`, which stores LF and checks out
-  whatever the platform uses, so those files are CRLF in a Windows working copy
-  and git says so on the first `git add`. PowerShell on Windows is the common
-  case for the tools here, and some hosts are fussy about the shebang line in a
-  shell script that arrived with CRLF. Do not normalise a file against that.
+  gives PowerShell and batch files CRLF, holds the LF-native languages at LF,
+  currently shell, Python, C, JavaScript, JSON and Markdown, and leaves
+  everything else to `text=auto`, which stores LF and checks out whatever the
+  platform uses, so those files are CRLF in a Windows working copy and git says
+  so on the first `git add`. That list is a summary and the file is the
+  authority: a language added there without this line being updated makes this
+  sentence wrong. PowerShell on Windows is the common case for the tools here,
+  and some hosts are fussy about the shebang line in a shell script that arrived
+  with CRLF. Do not normalise a file against that.
 - **CI's `gate` job is the only check worth requiring.** A job added above it
   but left out of its `needs` and its final step runs and is then ignored,
   which is worse than not running at all.
