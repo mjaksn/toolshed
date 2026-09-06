@@ -9,6 +9,9 @@ a repository of its own goes in here.
 
 ## What is in here
 
+- [BasicUpsAdapter](BasicUpsAdapter/), an HTTP adapter for a CyberPower UPS on
+  Linux: it reports what `pwrstat` knows and can shut the machine down, both
+  behind a static key. Node, no dependencies.
 - [apitrace](apitrace/), a Win32 API call tracer, the Windows analogue of strace:
   it launches a program as a debuggee and logs the calls it makes into the DLLs
   you select. In C and in Python, the same program twice.
