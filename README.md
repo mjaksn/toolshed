@@ -20,6 +20,9 @@ a repository of its own goes in here.
 - [EdfiScripts](EdfiScripts/), simple batch scripts providing basic automation of
   common tasks when doing local Ed-Fi ODS platform development, and very possibly
   outdated now.
+- [WinEvents](WinEvents/), a small Tk viewer for the classic Windows event logs,
+  written while learning how Windows stores them: the log list comes out of the
+  registry and the message text is assembled from the source's message DLL.
 
 ## What belongs here
 
