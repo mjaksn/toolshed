@@ -1,0 +1,47 @@
+# Lint settings for WinEvents only. Ruff resolves configuration per file against the
+# nearest config in its ancestors, so this applies to the two files here and leaves the
+# rest of the shed on the defaults.
+#
+# Both files are committed as written, the one exception being a single blank line
+# removed from `test_event_viewer.py` so that I001 could be satisfied rather than
+# ignored. This was a finished learning exercise rather than a tool under development,
+# and rewriting working code that talks to the Win32 event log API to satisfy a style
+# preference would risk the behaviour for no gain. Each ignore below is a decision
+# rather than a rule nobody looked at. If any of them stops being true, delete the line
+# and fix the code.
+
+[lint.isort]
+# `event_viewer` is the module under test, imported by `test_event_viewer.py` from the
+# same directory. Telling ruff it is first-party sorts the import block correctly
+# instead of ignoring the rule, which is why I001 is not in the list below.
+known-first-party = ["event_viewer"]
+
+[lint]
+ignore = [
+    # Naive datetimes, at nine sites across both files. The classic Windows event log
+    # returns `TimeGenerated` as a local-time value with no offset attached, which
+    # `event_viewer.py` says at the point it reads one. The hour cutoff it is compared
+    # against has to be naive local for the comparison to mean anything, so making
+    # either side aware would break the filter rather than improve it.
+    "DTZ001",
+    "DTZ005",
+
+    # Three blind `except Exception` handlers, each at a boundary where the exception
+    # type genuinely is not knowable in advance:
+    #   - the DWM dark title bar call, which is absent on older Windows builds and is
+    #     cosmetic either way, so failure is meant to be silent;
+    #   - `SafeFormatMessage`, which raises whatever the missing message DLL raises and
+    #     falls back to a placeholder string;
+    #   - the fetch worker, which runs on a background thread and hands the exception
+    #     to the UI thread over a queue. Letting it escape would lose it entirely.
+    "BLE001",
+
+    # `try`/`except`/`pass` in `apply_titlebar_theme`, the first of the three above.
+    # The comment beside it says why there is nothing to log: the window is already
+    # themed apart from its title bar.
+    "S110",
+
+    # One unpacked variable in a test that asserts on the other two values of the
+    # tuple. Renaming it to `_log_name` would say less than the name does.
+    "RUF059",
+]
