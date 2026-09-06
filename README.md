@@ -38,7 +38,8 @@ same shed because the sorting that matters is by task, not by runtime.
 
 One directory per tool at the top level, named after the tool, and each one
 self-contained: its own README saying what the tool does and how to run it, its
-own dependencies if it has any, its own tests if it has any.
+own dependencies if it has any, its own tests if it has any, and its own
+`ci.json` if it wants CI to check it.
 
 Self-contained is the rule that keeps this repository from turning into a
 project. Nothing imports across tool directories, and there is no shared
@@ -51,6 +52,37 @@ properly, rather than a root directory everything reaches into.
 Each tool's README is the instruction. There is no repository-wide install step
 and nothing to build at the root, because there is no repository-wide anything:
 a tool is fetched, read, and run on its own terms.
+
+## Checks
+
+CI checks a tool only when a change touches it, and runs that tool's own check
+rather than something generic imposed from the root.
+
+A tool opts in with a `ci.json` in its directory:
+
+```json
+{
+  "runner": "windows-latest",
+  "check": "pwsh -File ./check.ps1"
+}
+```
+
+`runner` is the GitHub hosted runner it needs, which matters here because the
+shed mixes PowerShell on Windows with things that want Linux. `check` runs from
+the tool's own directory, under bash on every runner, and fails the build by
+exiting non-zero. A tool wanting another interpreter names it in the command,
+as this one does. Running the check by hand is the same command from the same
+place, so a check that passes locally is the check CI runs.
+
+A tool with no `ci.json` is not checked, and most will not have one. There is
+no penalty for that, and nothing at the root has to be edited either way: the
+workflow finds the tools by looking, never from a list.
+
+`dispatch-desk` is the one tool with a check so far. It runs PSScriptAnalyzer,
+fetched from the gallery and verified against a recorded hash rather than
+installed, so what the check ran against is the same module every time. That is
+the same arrangement the tool already uses for powershell-yaml at run time, and
+for the same reason.
 
 ## Licence
 

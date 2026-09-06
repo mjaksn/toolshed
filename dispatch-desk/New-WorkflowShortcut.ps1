@@ -163,7 +163,6 @@ function Read-ParameterValue {
     # Prompts for a single workflow input value honoring its type.
     # Returns $null when the user leaves an optional value empty (meaning: omit it).
     param(
-        [string]$Name,
         [string]$Type,
         [string[]]$Options,
         [string]$Default,
@@ -864,14 +863,14 @@ foreach ($in in $inputs) {
     $promptDefault = $null
     if ($mode -eq 0) {
         Write-Host "    Enter the fixed value:" -ForegroundColor Gray
-        $fixedValue = Read-ParameterValue -Name $in.Name -Type $in.Type -Options $options -Default $in.Default -Required $in.Required -Prompt '    Value'
+        $fixedValue = Read-ParameterValue -Type $in.Type -Options $options -Default $in.Default -Required $in.Required -Prompt '    Value'
         if ($null -eq $fixedValue) { Write-Info 'Left unset; the workflow default will apply on every run.' }
     }
     else {
         $offerDefault = Read-YesNo '    Offer a default value at the run time prompt?' -Default ([bool]$in.Default)
         if ($offerDefault) {
             Write-Host "    Enter the default value:" -ForegroundColor Gray
-            $promptDefault = Read-ParameterValue -Name $in.Name -Type $in.Type -Options $options -Default $in.Default -Required $true -Prompt '    Default'
+            $promptDefault = Read-ParameterValue -Type $in.Type -Options $options -Default $in.Default -Required $true -Prompt '    Default'
         }
     }
 

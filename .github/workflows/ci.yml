@@ -15,6 +15,10 @@ name: CI
 # not enter the pull request's status check rollup, and the rollup, not the
 # commit, is what a ruleset evaluates. So dispatch is a convenience here, never
 # the gate.
+#
+# All three triggers reach the `changes` job below, and each carries a
+# different idea of what "changed" means. That is handled there rather than
+# here.
 on:
   workflow_dispatch:
   pull_request:
@@ -29,6 +33,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: which tools changed
+    runs-on: ubuntu-latest
+    outputs:
+      tools: ${{ steps.detect.outputs.tools }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history, because the base of the comparison is an
+          # arbitrary commit and a shallow clone would not contain it.
+          fetch-depth: 0
+      - id: detect
+        # The two shas differ per trigger, and on a manual run there is no
+        # range at all. What that means is the script's problem, not this
+        # file's, so both are passed through as they come.
+        #
+        # Through `env` rather than interpolated into the `run` line, which is
+        # the documented way to keep a value out of the shell's own parsing.
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: python3 .github/changed_tools.py "$EVENT" "$BASE" "$HEAD"
+
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -38,29 +66,78 @@ jobs:
         with:
           python-version: "3.12"
       - name: install the tools
-        run: pip install ruff
+        # Pinned by version and by hash, and --require-hashes is what makes the
+        # hashes mean anything. Left off, pip installs the version and verifies
+        # nothing.
+        run: pip install --require-hashes --requirement .github/requirements-lint.txt
       - name: ruff
-        # Repository-wide, and it passes vacuously while there is no Python
-        # here. That is the point of seeding it now: the first script to land
-        # is linted the day it lands rather than the day somebody remembers to
-        # wire this up.
+        # Repository-wide, and unconditional, unlike the per tool checks below.
+        # Some of what it covers is the CI plumbing, which every tool depends
+        # on and which therefore has to be checked whatever a change touched.
+        # The rest is whatever Python the tools have brought with them: ruff
+        # resolves configuration per file against the nearest config in its
+        # ancestors, so a tool with its own ruff.toml is linted on its own
+        # terms by this one command.
         run: ruff check .
+
+  tools:
+    name: check ${{ matrix.tool.name }}
+    needs: changes
+    # An empty matrix is an error rather than an empty job, so the job has to
+    # be kept from starting at all when nothing that declares a check was
+    # touched. It then reports `skipped`, which `gate` reads as a pass.
+    if: needs.changes.outputs.tools != '[]'
+    strategy:
+      # One tool's failure says nothing about another's, and finding out about
+      # both in one run beats finding out about them in two.
+      fail-fast: false
+      matrix:
+        tool: ${{ fromJSON(needs.changes.outputs.tools) }}
+    runs-on: ${{ matrix.tool.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: run the tool's own check
+        # The command comes out of the tool's ci.json and is run as written.
+        # That is the whole point of the arrangement, and it means a ci.json is
+        # as much a thing to read in review as the script beside it.
+        #
+        # bash on every runner, Windows included, where it is the git bash that
+        # the image ships. The shell is not a per tool choice because `shell`
+        # is one of the few keys that refuses an expression: a matrix value
+        # here is not a runtime error but a workflow that will not start at
+        # all, which is how this was found. So a tool that wants another
+        # interpreter names it in its own command, which is what running the
+        # check by hand looks like anyway.
+        working-directory: ${{ matrix.tool.name }}
+        shell: bash
+        run: ${{ matrix.tool.check }}
 
   gate:
     name: gate
     # The single check for branch protection to require. Runs whatever the
     # others did, so a failure upstream is reported here rather than leaving
     # the gate skipped and the requirement satisfied by default.
-    #
-    # Tools arrive in their own languages and bring their own checks, so this
-    # list is expected to grow a job per language rather than per tool. Add the
-    # job above, add it to `needs`, and add its line here: a job left out of
-    # this step runs and is then ignored, which is worse than not running.
     if: always()
-    needs: [lint]
+    needs: [changes, lint, tools]
     runs-on: ubuntu-latest
     steps:
-      - name: every job must have succeeded
+      - name: every job must have succeeded or been skipped for a good reason
         run: |
-          echo "lint ${{ needs.lint.result }}"
+          echo "changes ${{ needs.changes.result }}"
+          echo "lint    ${{ needs.lint.result }}"
+          echo "tools   ${{ needs.tools.result }}"
+
+          # These two run on every trigger, so anything other than success is
+          # a failure. `changes` especially: if it did not run, the tools job
+          # was skipped for want of a matrix rather than for want of work, and
+          # treating that as a pass would wave through untested changes.
+          [ "${{ needs.changes.result }}" = "success" ] || exit 1
           [ "${{ needs.lint.result }}" = "success" ] || exit 1
+
+          # `tools` is conditional, and skipped is its ordinary resting state:
+          # it means no directory that declares a check was touched. Only
+          # failure and cancellation are failures.
+          case "${{ needs.tools.result }}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
