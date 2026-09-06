@@ -23,6 +23,9 @@ a repository of its own goes in here.
 - [EdfiScripts](EdfiScripts/), simple batch scripts providing basic automation of
   common tasks when doing local Ed-Fi ODS platform development, and very possibly
   outdated now.
+- [lock-hashes](lock-hashes/), a Python script that rewrites a pip requirements
+  file so every pin carries the hashes `pip install --require-hashes` checks
+  against, with a check mode for CI. Standard library only.
 - [WinEvents](WinEvents/), a small Tk viewer for the classic Windows event logs,
   written while learning how Windows stores them: the log list comes out of the
   registry and the message text is assembled from the source's message DLL.
@@ -87,15 +90,16 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Three tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer,
+Four tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer,
 fetched from the gallery and verified against a recorded hash rather than
 installed, so what the check ran against is the same module every time. That is
 the same arrangement the tool already uses for powershell-yaml at run time, and
 for the same reason. `BasicUpsAdapter` runs its own test suite under
 `node --test`, with nothing to install first. `WinEvents` installs its test
-dependencies, pinned by version and hash, and runs `pytest`. Each of the last
-two keeps the command in a `check.sh` beside its `ci.json`, so the check CI runs
-is one a person can run too.
+dependencies, pinned by version and hash, and runs `pytest`. `lock-hashes` runs
+its own tests under `unittest`, with nothing to install. Each of the last three
+keeps the command in a `check.sh` beside its `ci.json`, so the check CI runs is
+one a person can run too.
 
 ## Licence
 
