@@ -5,7 +5,8 @@ reopened after a reboot with `claude --resume`.
 
 Windows only, and PowerShell 7 or later. It reads Windows process start times to tell a
 live session from a stale record, and opens consoles through Windows Terminal. No
-dependencies beyond PowerShell itself.
+dependencies beyond PowerShell itself and the Windows Script Host, which is part of
+Windows and is only used to start the scheduled task without a window.
 
 ## Why this is not just a directory listing
 
@@ -71,6 +72,18 @@ user, while that user is logged on.
 It does not need an elevated shell. After registering, the task first fires at your
 next logon; run `Start-ScheduledTask -TaskName ClaudeSessionSnapshot` to take one
 immediately.
+
+The task does not start pwsh directly. Its action is
+
+```text
+wscript.exe //B //Nologo "<dir>\Start-Hidden.js" "<pwsh>" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<dir>\Save-ClaudeSessions.ps1" -Quiet
+```
+
+where `Start-Hidden.js` is a small script that starts whatever command follows it
+with no window, waits, and exits with the child's exit code. Started directly, pwsh
+flashes a console window on every run, which every three minutes is a real nuisance;
+the gotcha below has the details. The launcher knows nothing about Claude Code, so it
+can be copied anywhere else that has the same problem.
 
 Snapshotting on a timer rather than at shutdown is the whole design decision. A
 shutdown script is the obvious approach and it fails in both directions: a graceful
@@ -165,3 +178,14 @@ first. It is free if it turns out not to be required.
 - **The task only runs while you are logged on,** by design. Process start times and
   the session registry both belong to the logged-on user, so a task configured to run
   whether or not the user is present would see nothing useful.
+- **`pwsh -WindowStyle Hidden` still flashes a window from Task Scheduler.** pwsh is a
+  console program, so it has a console before it reads that flag, and when Windows
+  Terminal is the default terminal it takes that console over and paints a window in
+  the moment before pwsh hides it. The task's `Hidden` setting is no help either; it
+  only hides the task in the Task Scheduler list. The fix is to start pwsh from a
+  program that has no console and asks for the child to be hidden from the start,
+  which is what `Start-Hidden.js` under `wscript.exe` does. `conhost.exe --headless`
+  also hides the window but was seen to return exit code 0 for a child that exited 7,
+  which would turn every failed snapshot into a success in `-Status`. VBScript would
+  work the same way and is on Microsoft's deprecation list; JScript under the same
+  host is not.

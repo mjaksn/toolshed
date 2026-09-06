@@ -18,6 +18,10 @@
     session registry it reads belongs to that user and process start times are only
     readable from inside the same session.
 
+    The action goes through Start-Hidden.js, beside this script, rather than starting
+    pwsh directly. Started directly, pwsh shows a console window for a moment on every
+    run; the launcher creates it hidden from the start. The README has the details.
+
 .PARAMETER IntervalMinutes
     How often to snapshot. Three minutes is a reasonable trade between a stale snapshot
     and pointless wakeups.
@@ -106,11 +110,23 @@ if (-not (Test-Path -LiteralPath $ScriptPath)) {
 $ScriptPath = (Resolve-Path -LiteralPath $ScriptPath).Path
 
 $pwsh = (Get-Command pwsh.exe -ErrorAction Stop).Source
+$wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+
+# pwsh cannot be started without a window from Task Scheduler. It owns a console
+# before it reads -WindowStyle Hidden, and Windows Terminal, when it is the default
+# terminal, shows that console for a moment before pwsh hides it. Start-Hidden.js
+# runs under wscript.exe, which has no console, creates the child hidden from the
+# start, and passes its exit code back so LastTaskResult still means something.
+$launcher = Join-Path $PSScriptRoot 'Start-Hidden.js'
+if (-not (Test-Path -LiteralPath $launcher)) {
+    throw "Cannot find the launcher at $launcher. It lives beside this script."
+}
 
 # -NonInteractive and -NoProfile keep the run short and stop a slow profile from
-# turning a three minute cadence into overlapping runs.
-$action = New-ScheduledTaskAction -Execute $pwsh `
-    -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Quiet"
+# turning a three minute cadence into overlapping runs. //B makes a script host
+# error exit rather than show a dialog.
+$action = New-ScheduledTaskAction -Execute $wscript `
+    -Argument "//B //Nologo `"$launcher`" `"$pwsh`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$ScriptPath`" -Quiet"
 
 # At logon, then every IntervalMinutes for as long as the session lasts. The repetition
 # has to be lifted off a throwaway Once trigger because New-ScheduledTaskTrigger will
