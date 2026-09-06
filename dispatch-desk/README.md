@@ -126,7 +126,8 @@ offers, `the-undercroft` and `the-tavern`, exist in this repository for that rea
 alone and carry no protection rules.
 
 Set the shortcut up against it with `toolshed` as the repository and `Dungeon Crawl`
-as the workflow. A run descends one room per second, so `rooms` is also how long you
+as the workflow, once this file is on `main`, since GitHub only registers a
+`workflow_dispatch` workflow from the default branch. A run descends one room per second, so `rooms` is also how long you
 want to watch `gh run watch` stream for. Anything that is not a whole number from 0
 to 120 fails the run on purpose, with a message saying why, which is a useful thing
 to try from the shortcut too.
