@@ -6,7 +6,8 @@ reopened after a reboot with `claude --resume`.
 Windows only, and PowerShell 7 or later. It reads Windows process start times to tell a
 live session from a stale record, and opens consoles through Windows Terminal. No
 dependencies beyond PowerShell itself and the Windows Script Host, which is part of
-Windows and is only used to start the scheduled task without a window.
+Windows and is only used to start the scheduled task without a window. Linting this
+directory fetches PSScriptAnalyzer, which nothing else here needs.
 
 ## Why this is not just a directory listing
 
@@ -34,7 +35,7 @@ started. Checking that the pid exists is not enough on its own, because Windows 
 pids; checking that the pid exists *and* started at exactly the recorded moment is an
 identity check.
 
-## The three pieces
+## The four pieces
 
 ### Save-ClaudeSessions.ps1
 
@@ -122,6 +123,26 @@ Any session already open in a console is skipped, so running it twice does not g
 two consoles on the same session. Open means what it means in the table above, so a
 background job or an SDK caller with a live process is not one of them and is not
 counted in the number this reports as already running.
+
+### New-DesktopShortcut.ps1
+
+Puts a shortcut to each of the two on the desktop, ready to double click.
+
+```powershell
+./New-DesktopShortcut.ps1              # write both, leaving any that exist alone
+./New-DesktopShortcut.ps1 -WhatIf      # say what it would write
+./New-DesktopShortcut.ps1 -Force       # replace shortcuts already there
+```
+
+Each one targets `pwsh.exe` and passes its script with `-File`, because a shortcut
+pointing straight at a `.ps1` opens it in an editor rather than running it, and the
+gotcha below has what happens if you reach for the context menu instead. `-NoExit`
+holds the console open when the script finishes, so an error is something you can
+read rather than something you glimpse.
+
+The icons are `SHELL32.dll` indices, one for each script, and `-SaveIcon` and
+`-RestoreIcon` take another pair in the same `file,index` form. `-Destination`
+writes somewhere other than the desktop.
 
 ## Checking it
 
