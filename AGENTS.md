@@ -62,20 +62,19 @@ arrival whatever else a change touched. CI installs ruff from
 version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-Five tools have a check. `cd dispatch-desk && ./check.ps1` runs
+Six tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and takes about a minute the first time,
 because it fetches the module, and seconds afterwards from the cache. It passes
-with nothing reported. `cd RemoveNewline && ./check.ps1` fetches the analyzer
-the same way, from the same cache, and then runs the module's tests.
-`cd BasicUpsAdapter && bash ./check.sh` runs the Node test suite with nothing
-to install, and `cd WinEvents && bash ./check.sh` installs the pinned test
-dependencies and runs pytest; the second is Windows only, because pywin32 is.
-`cd lock-hashes && bash ./check.sh` runs its unittest suite with nothing to
-install. Every one of these was run in this checkout and passes.
-
-The PowerShell in `claude-sessions` is not linted, because that tool has no
-`ci.json`. That is a gap rather than a decision, and closing it is a matter of
-giving it one.
+with nothing reported. `cd claude-sessions && ./check.ps1` is a copy of that
+script pointed at its own directory, with its own settings file, and passes the
+same way; the copies are deliberate and may drift. `cd RemoveNewline &&
+./check.ps1` fetches the analyzer the same way, from the same cache, and then
+runs the module's tests. `cd BasicUpsAdapter && bash ./check.sh` runs the Node
+test suite with nothing to install, and `cd WinEvents && bash ./check.sh`
+installs the pinned test dependencies and runs pytest; the second is Windows
+only, because pywin32 is. `cd lock-hashes && bash ./check.sh` runs its unittest
+suite with nothing to install. Every one of these was run in this checkout and
+passes.
 
 Every command in this table has been run in this repo and its output verified.
 If one is added without running it, mark it `UNVERIFIED` rather than implying
