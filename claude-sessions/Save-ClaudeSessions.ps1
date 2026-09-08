@@ -26,9 +26,11 @@
     Where Claude Code keeps its live session registry.
 
 .PARAMETER SnapshotPath
-    Where to write the snapshot. The previous snapshot is kept alongside it with a
-    .prev.json suffix, so a run that catches a moment with nothing open does not
-    destroy the list from the run before it.
+    Where to write the snapshot. A run that finds nothing open leaves an existing
+    snapshot that names sessions exactly as it is, rather than emptying it, because
+    nothing open now is not evidence that nothing was open a minute ago. The snapshot
+    it replaces is also kept alongside it with a .prev.json suffix, as a second line
+    of defence that nothing reads automatically.
 
 .PARAMETER NoWrite
     Report what is open without touching the snapshot.
@@ -131,6 +133,29 @@ function Get-ClaudeSessionRecord {
     return $records
 }
 
+function Test-SnapshotHasSession {
+    <#
+        True when the file at Path is a snapshot this script can read and it names at
+        least one session. Anything it cannot read that way counts as naming none, so a
+        corrupt snapshot cannot block a good one from replacing it.
+    #>
+    param([string] $Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+
+    try {
+        $existing = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return $false
+    }
+
+    # ConvertFrom-Json returns nothing at all for valid JSON that is not an object, so
+    # a null has to be caught here as well as a parse failure above.
+    if ($null -eq $existing) { return $false }
+    if (-not $existing.PSObject.Properties.Name.Contains('sessions')) { return $false }
+    return (@($existing.sessions).Count -gt 0)
+}
+
 function Write-SnapshotAtomically {
     param([string] $Path, [object] $Payload)
 
@@ -150,7 +175,9 @@ function Write-SnapshotAtomically {
     Move-Item -LiteralPath $tmp -Destination $Path -Force
 }
 
-$all = Get-ClaudeSessionRecord -Directory $SessionDir
+# The @() matters. A function returning an empty array hands back nothing at all, and
+# under Set-StrictMode the $all.Count below then throws rather than reporting zero.
+$all = @(Get-ClaudeSessionRecord -Directory $SessionDir)
 
 $open = @($all | Where-Object {
     $_.Kind -eq 'interactive' -and
@@ -158,7 +185,12 @@ $open = @($all | Where-Object {
     (Test-ProcessMatches -ProcessId $_.Pid -ProcStart $_.ProcStart)
 })
 
-if (-not $NoWrite) {
+# Nothing open now is not evidence that nothing was open before. Closing every window
+# a minute ahead of a shutdown would otherwise let the next run replace a good snapshot
+# with an empty one, and Restore-ClaudeSessions.ps1 reads only the current file.
+$keptPreviousSnapshot = (-not $NoWrite) -and $open.Count -eq 0 -and (Test-SnapshotHasSession -Path $SnapshotPath)
+
+if (-not $NoWrite -and -not $keptPreviousSnapshot) {
     $payload = [pscustomobject]@{
         schema     = 1
         capturedAt = (Get-Date).ToUniversalTime().ToString('o')
@@ -180,6 +212,9 @@ if (-not $NoWrite) {
 if (-not $Quiet) {
     if ($open.Count -eq 0) {
         Write-Host "No open Claude Code sessions. $($all.Count) registered, none of them a typeable console window."
+        if ($keptPreviousSnapshot) {
+            Write-Host "Kept the snapshot at $SnapshotPath as it is, rather than emptying it."
+        }
     } else {
         $open | Select-Object Pid, SessionId, Name, Cwd
         $where = if ($NoWrite) { 'not written' } else { $SnapshotPath }

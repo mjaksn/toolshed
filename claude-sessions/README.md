@@ -39,9 +39,9 @@ identity check.
 ### Save-ClaudeSessions.ps1
 
 Reads the registry, applies the filter above, and writes the survivors to
-`%LOCALAPPDATA%\claude-sessions\snapshot.json`. The previous snapshot is kept beside it
-as `snapshot.json.prev.json`, so a run that catches a moment with nothing open does not
-destroy the list from the run before.
+`%LOCALAPPDATA%\claude-sessions\snapshot.json`. The snapshot it replaces is kept beside
+it as `snapshot.json.prev.json`, which nothing reads on its own but which is there when
+you want it.
 
 ```powershell
 ./Save-ClaudeSessions.ps1 -NoWrite     # list what is open, write nothing
@@ -52,10 +52,19 @@ destroy the list from the run before.
 The write is atomic: a temporary file next to the target, then a move into place, so a
 reboot landing mid-write leaves the old snapshot rather than half a new one.
 
+A run that finds nothing open leaves an existing snapshot exactly as it is, and says so
+rather than pretending to have written one. Nothing open now is not evidence that
+nothing was open a minute ago, and closing every window shortly before a shutdown is
+precisely the case where the older list is the one worth keeping. The file is replaced
+only when there is something to put in it, or when what it would overwrite names no
+sessions either. This matters because a snapshot can be emptied without the registry
+being empty: one background job or SDK caller still registered leaves the collector
+with something to read and nothing to record.
+
 If the registry directory is missing, or every file in it lacks the fields this script
-expects, it throws rather than writing an empty snapshot over a good one. That is
-deliberate. The alternative failure, silently reporting that nothing is open, is the
-one you would not notice until the day you needed the snapshot.
+expects, it throws rather than writing anything at all. That is deliberate. The
+alternative failure, silently reporting that nothing is open, is the one you would not
+notice until the day you needed the snapshot.
 
 ### Register-SnapshotTask.ps1
 
@@ -109,8 +118,10 @@ still sitting in the live registry. The second matters after an ungraceful shutd
 where the files were never cleaned up and so name exactly the sessions that were open
 when the power went.
 
-Anything currently running is skipped, so running it twice does not give you two
-consoles on the same session.
+Any session already open in a console is skipped, so running it twice does not give you
+two consoles on the same session. Open means what it means in the table above, so a
+background job or an SDK caller with a live process is not one of them and is not
+counted in the number this reports as already running.
 
 ## Try this before installing any of it
 
@@ -169,6 +180,19 @@ first. It is free if it turns out not to be required.
   copying anywhere else that registers a task.
 - **A newly registered task reports `LastTaskResult` 267011,** which is
   `SCHED_S_TASK_HAS_NOT_RUN` and not a failure. `-Status` says so rather than warning.
+- **"Run with PowerShell" on the context menu is not PowerShell 7.** The verb Windows
+  registers for a `.ps1` runs `powershell.exe`, which is Windows PowerShell 5.1, and
+  every script here opens with `#Requires -Version 7.0`, so 5.1 refuses to run them at
+  all. The refusal is printed into a window that carries no `-NoExit`, so it closes on
+  the message and the whole thing looks like a script that ran and did nothing. A
+  desktop shortcut wants `pwsh.exe` as its target and `-NoExit -File "<script>"` as its
+  arguments, which both runs it under 7 and leaves any error on screen. A shortcut
+  pointing straight at the `.ps1` is worse still: it opens the script in whatever
+  editor the file type is associated with.
+- **`-Status` printing an empty `NextRunTime` is not a fault.** A repetition hung off a
+  logon trigger reports no next run time even while it is repeating on schedule. Read
+  `LastRunTime` twice instead, an interval apart. There is no per run history to check
+  against either, because the Task Scheduler operational log is disabled by default.
 - **The launch path has not been run against a directory whose name contains a
   space.** Windows Terminal parses its own command line and then tokenises the trailing
   command again, so `-d` with such a path is the most likely thing to break first. Every

@@ -17,8 +17,11 @@
       shutdown is a set of files for processes that no longer exist. Those are stale
       records rather than junk: they name sessions that were open when the power went.
 
-    Anything currently running is skipped, so this is safe to run twice and safe to run
-    with sessions already open.
+    Any session already open in a console is skipped, so this is safe to run twice and
+    safe to run with sessions already open. Open means what it means in the collector:
+    an interactive cli session whose process is alive. A background job or an SDK caller
+    is running too, but it is not a console anyone could type into and it is not counted
+    as one.
 
 .PARAMETER SnapshotPath
     The snapshot written by Save-ClaudeSessions.ps1.
@@ -108,7 +111,13 @@ function Get-LiveRegistryRecord {
 }
 
 $live = Get-LiveRegistryRecord -Directory $SessionDir
-$alreadyOpen = @($live | Where-Object Running | Select-Object -ExpandProperty SessionId)
+
+# Running is not the same as open. A background job or an SDK caller has a live process
+# and a registry entry, and counting either as an open console overstates what this run
+# left alone. The filter is the collector's, so both scripts mean the same thing by it.
+$alreadyOpen = @($live |
+    Where-Object { $_.Running -and $_.Kind -eq 'interactive' -and $_.Entry -eq 'cli' } |
+    Select-Object -ExpandProperty SessionId)
 
 $candidates = [ordered]@{}
 
