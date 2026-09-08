@@ -70,7 +70,7 @@ function Get-TranscriptPath {
         written on, including worktree paths, but it is a convention read off the disk
         rather than a documented one.
     #>
-    param([string] $Cwd, [string] $SessionId)
+    param([string] $Cwd, [string] $SessionId, [string] $ProjectDir)
 
     $encoded = $Cwd -replace '[^A-Za-z0-9]', '-'
     return (Join-Path $ProjectDir (Join-Path $encoded "$SessionId.jsonl"))
@@ -165,7 +165,7 @@ foreach ($c in $candidates.Values) {
         continue
     }
     if ($Verify) {
-        $t = Get-TranscriptPath -Cwd $c.Cwd -SessionId $c.SessionId
+        $t = Get-TranscriptPath -Cwd $c.Cwd -SessionId $c.SessionId -ProjectDir $ProjectDir
         if (-not (Test-Path -LiteralPath $t)) {
             Write-Warning "Skipping $($c.SessionId): no transcript at $t"
             continue

@@ -65,7 +65,7 @@ $ErrorActionPreference = 'Stop'
 # than quietly reporting that nothing is open.
 $RequiredFields = @('pid', 'sessionId', 'cwd', 'kind', 'entrypoint', 'procStart')
 
-function Test-ProcessMatches {
+function Test-ProcessMatch {
     <#
         True when the pid is running and started at exactly the recorded time.
         Windows records process start as a FILETIME, which is what makes this an
@@ -182,7 +182,7 @@ $all = @(Get-ClaudeSessionRecord -Directory $SessionDir)
 $open = @($all | Where-Object {
     $_.Kind -eq 'interactive' -and
     $_.Entrypoint -eq 'cli' -and
-    (Test-ProcessMatches -ProcessId $_.Pid -ProcStart $_.ProcStart)
+    (Test-ProcessMatch -ProcessId $_.Pid -ProcStart $_.ProcStart)
 })
 
 # Nothing open now is not evidence that nothing was open before. Closing every window

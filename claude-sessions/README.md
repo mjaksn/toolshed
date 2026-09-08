@@ -123,6 +123,25 @@ two consoles on the same session. Open means what it means in the table above, s
 background job or an SDK caller with a live process is not one of them and is not
 counted in the number this reports as already running.
 
+## Checking it
+
+```powershell
+cd claude-sessions
+./check.ps1              # lint this directory
+./check.ps1 -Refresh     # and fetch the linter again rather than using the cache
+```
+
+`check.ps1` runs PSScriptAnalyzer over this directory. The module is fetched from
+the gallery as a package pinned by version and by hash, verified on every run
+including against the cached copy, and imported from where it unpacked rather than
+installed. Fetching takes a few seconds; a later run from the cache is quicker. The
+script is a copy of the one in `dispatch-desk`, which is what this repository does
+instead of a shared helper, so the two may drift.
+
+`PSScriptAnalyzerSettings.psd1` beside it switches off one rule and says why.
+Everything else is on and the check passes with nothing reported. `ci.json` is what
+makes CI run it on a Windows runner whenever something in this directory changes.
+
 ## Try this before installing any of it
 
 There is one experiment worth running first, because it might make the scheduled task
