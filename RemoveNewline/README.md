@@ -25,14 +25,16 @@ written back without one, so nothing gains a mark it did not have.
 
 ## What it needs
 
-PowerShell 7. It uses only what PowerShell and .NET ship with.
+Windows PowerShell 5.1 or later, PowerShell 7 included. It uses only what
+PowerShell and .NET ship with.
 
 ## Installing it
 
 Copy this directory, or only `RemoveNewline.psm1` inside a directory of the
-same name, into any directory on `$env:PSModulePath`, such as
-`Documents\PowerShell\Modules`. PowerShell then loads it on first use. Or
-import it by path from anywhere:
+same name, into any directory on `$env:PSModulePath`: `Documents\PowerShell\Modules`
+for PowerShell 7, or `Documents\WindowsPowerShell\Modules` for Windows
+PowerShell 5.1, which are separate and neither of which is read by the other.
+PowerShell then loads it on first use. Or import it by path from anywhere:
 
 ```
 Import-Module .\RemoveNewline.psm1
@@ -42,11 +44,13 @@ Import-Module .\RemoveNewline.psm1
 
 ```
 pwsh -File ./test.ps1
+powershell -File ./test.ps1     # and under Windows PowerShell 5.1
 ```
 
 20 cases, in plain PowerShell with no test framework, so there is nothing to
 install. Each writes a file with known bytes, runs the command, and compares
-the bytes that came out.
+the bytes that came out. They pass under both PowerShells, which is what backs
+the version claim above rather than leaving it as an assertion.
 
 `check.ps1` runs PSScriptAnalyzer over the directory and then those tests, and
 is what CI runs, on `windows-latest`, per `ci.json`. The analyzer is fetched

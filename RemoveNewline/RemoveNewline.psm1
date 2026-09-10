@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 function Get-BomEncoding {
     # Detects a byte order mark and returns a matching encoding.
     # Falls back to UTF-8 without BOM when no mark is present.
