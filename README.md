@@ -103,12 +103,12 @@ arrangement the tool already uses for powershell-yaml at run time, and for the
 same reason, and it then runs its own tests. `claude-sessions` runs a copy of
 that analyzer script pointed at its own directory, with its own settings file.
 `RemoveNewline` and `install-modules` fetch the analyzer the same way and then
-run their own tests, written in plain PowerShell.
-`BasicUpsAdapter` runs its own test suite under `node --test`, with nothing to
-install first. `WinEvents` installs its test dependencies, pinned by version and
-hash, and runs `pytest`. `lock-hashes` runs its own tests under `unittest`, with
-nothing to install. Those last three each keep the command in a `check.sh`
-beside its `ci.json`, so the check CI runs is one a person can run too.
+run their own tests, written in plain PowerShell. `BasicUpsAdapter` runs its
+own test suite under `node --test`, with nothing to install first. `WinEvents`
+installs its test dependencies, pinned by version and hash, and runs `pytest`.
+`lock-hashes` runs its own tests under `unittest`, with nothing to install.
+Those last three each keep the command in a `check.sh` beside its `ci.json`, so
+the check CI runs is one a person can run too.
 
 ## Licence
 
