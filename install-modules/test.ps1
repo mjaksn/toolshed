@@ -315,12 +315,16 @@ try {
     # Linking
     # -----------------------------------------------------------------
     if (-not $canLink) {
+        # One name for each assertion in the else branch, so the number of
+        # cases reported is the same whether or not links can be made here.
         foreach ($c in 'a link points at the tool directory',
                        'the link is named after the module',
+                       'the link targets the tool directory, whatever it is called',
                        'a second run changes nothing',
                        'a link somewhere else is not replaced without Force',
                        'a link somewhere else is replaced with Force',
-                       'an installed module is found by name') {
+                       'an installed module is found by name in PowerShell 7',
+                       'an installed module is found by name in Windows PowerShell 5.1') {
             Skip-Case $c 'symbolic links cannot be created here'
         }
     }
