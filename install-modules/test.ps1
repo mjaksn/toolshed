@@ -375,7 +375,7 @@ finally {
 }
 
 Write-Output ''
-$total = $script:passed + $script:failed
+$total = $script:passed + $script:failed + $script:skipped
 $note = if ($script:skipped -gt 0) { ", $($script:skipped) skipped" } else { '' }
 Write-Output "$total cases, $($script:passed) passed, $($script:failed) failed$note."
 if ($script:failed -gt 0) { exit 1 }
