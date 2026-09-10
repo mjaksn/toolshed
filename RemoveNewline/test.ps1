@@ -1,4 +1,4 @@
-#Requires -Version 7
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Tests for Remove-Newline. Run by check.ps1, and runnable by hand.
@@ -8,6 +8,9 @@
     pin. Each case writes a file with known bytes into a temporary directory,
     runs the function over it, and compares the bytes that came out with the
     bytes expected. Exits non-zero if any case failed.
+
+    Runs under Windows PowerShell 5.1 as well as 7, because 5.1 is the floor the
+    module claims and a claim is worth checking rather than asserting.
 #>
 [CmdletBinding()]
 param()
@@ -68,7 +71,11 @@ $p = Write-Case 'cr.txt' (Utf8 "a`rb`r")
 Remove-Newline $p
 Assert-Content 'bare CR is removed' (Utf8 'ab') $p
 
-$p = Write-Case 'unicode.txt' (Utf8 "a`u{0085}b`u{2028}c`u{2029}d")
+# Built from code points rather than written as `u{0085} and friends, because
+# that escape is PowerShell 6 and later only, and these tests have to run on
+# the 5.1 the module supports.
+$separators = "a" + [char]0x0085 + "b" + [char]0x2028 + "c" + [char]0x2029 + "d"
+$p = Write-Case 'unicode.txt' (Utf8 $separators)
 Remove-Newline $p
 Assert-Content 'NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR are removed' (Utf8 'abcd') $p
 
