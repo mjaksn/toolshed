@@ -17,9 +17,9 @@ a repository of its own goes in here.
   you select. In C and in Python, the same program twice.
 - [claude-sessions](claude-sessions/), PowerShell scripts that record which Claude
   Code sessions are open in a console window and reopen them after a reboot.
-- [dispatch-desk](dispatch-desk/), a PowerShell script that creates Windows
-  desktop shortcuts, each one dispatching a GitHub Actions workflow and then
-  watching the run through to its conclusion.
+- [dispatch-desk](dispatch-desk/), a PowerShell script, and the same thing again
+  as a module, that creates Windows desktop shortcuts, each one dispatching a
+  GitHub Actions workflow and then watching the run through to its conclusion.
 - [EdfiScripts](EdfiScripts/), simple batch scripts providing basic automation of
   common tasks when doing local Ed-Fi ODS platform development, and very possibly
   outdated now.

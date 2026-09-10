@@ -2,16 +2,20 @@
 
 Create Windows desktop shortcuts that trigger GitHub Actions workflows.
 
-Run the setup script once per workflow. It walks you through picking a repository, workflow, branch, and values for each `workflow_dispatch` input, verifies everything against GitHub, and drops a shortcut on your desktop. Double-clicking the shortcut opens a console window that prompts for any inputs you chose to leave open, dispatches the workflow, shows the run URL, waits for it to finish, and reports the result.
+Run the setup once per workflow. It walks you through picking a repository, workflow, branch, and values for each `workflow_dispatch` input, verifies everything against GitHub, and drops a shortcut on your desktop. Double-clicking the shortcut opens a console window that prompts for any inputs you chose to leave open, dispatches the workflow, shows the run URL, waits for it to finish, and reports the result.
+
+There are two ways to run it, doing the same thing: `New-WorkflowShortcut.ps1`, a single file you can copy anywhere and run, and `DispatchDesk.psm1`, a module exporting one command. Pick whichever suits; the [Module](#module) section covers what differs.
 
 ## Requirements
 
 - Windows with PowerShell 5.1 or later (PowerShell 7 also works)
 - [GitHub CLI](https://cli.github.com) installed and authenticated (`gh auth login`)
 - Write (push) access to the target repository, which GitHub requires for dispatching workflows
-- The [powershell-yaml](https://github.com/cloudbase/powershell-yaml) module, which the setup script fetches for itself on first run after asking. Nothing is installed: the package is downloaded from the gallery, checked against a SHA256 recorded in the script, unpacked under the temporary directory and imported from there. A copy of powershell-yaml already on the machine is neither used nor disturbed.
+- The [powershell-yaml](https://github.com/cloudbase/powershell-yaml) module, which the setup fetches for itself on first run after asking. Nothing is installed: the package is downloaded from the gallery, checked against a SHA256 recorded beside the version it pins, unpacked under the temporary directory and imported from there. A copy of powershell-yaml already on the machine is neither used nor disturbed, and when the module form loads it the import lands in the module's own session state, so the session you called it from does not gain a `ConvertFrom-Yaml` either.
 
 ## Setup
+
+Step 1 is for the script. The module takes the owner as a parameter instead, and the rest of this section applies to both.
 
 1. Open `New-WorkflowShortcut.ps1` and set `$GitHubOwner` to your GitHub username or organization.
 2. Run the script from this directory:
@@ -33,7 +37,33 @@ Run the setup script once per workflow. It walks you through picking a repositor
    - **Inputs**: for each `workflow_dispatch` input you choose either a fixed value used on every run, or a prompt shown each time the shortcut runs. Prompted inputs can carry a default that the workflow's own default pre-fills. Choice, boolean, and environment inputs are picked from a list. Optional inputs can be left unset so the workflow default applies.
    - **Shortcut name**: defaults to `<repo> - <workflow name>`.
 
-The script confirms a summary before writing anything.
+A summary is shown and confirmed before anything is written.
+
+## Module
+
+`DispatchDesk.psm1` exports one command, `New-WorkflowShortcut`.
+
+```powershell
+Import-Module .\DispatchDesk.psm1
+New-WorkflowShortcut -Owner mjaksn
+```
+
+To have PowerShell find it by name, copy the `.psm1` into a directory called `DispatchDesk` somewhere on `$env:PSModulePath`, such as `Documents\PowerShell\Modules`.
+
+Three things differ from the script, and they are the three things that make it a module rather than a script with a different extension:
+
+- **The owner is a parameter.** `-Owner` is mandatory and positional, so there is no line to edit before first use and no reason to keep one copy of the file per account.
+- **A failure throws.** The script prints its message and calls `exit`, which in a module would close the session that called it. The command raises an ordinary terminating error instead, so `try`/`catch` works and the session you called it from is still there afterwards. Cleanup of half-written files happens first either way.
+- **A successful run returns an object**, carrying `Owner`, `Repository`, `Branch`, `Workflow`, `WorkflowFile`, `ShortcutName`, `ShortcutPath`, `LauncherPath`, `RunnerPath` and `LogDirectory`.
+
+```powershell
+$shortcut = New-WorkflowShortcut -Owner mjaksn
+Invoke-Item $shortcut.LauncherPath
+```
+
+Everything else, every prompt and every prerequisite check, is the script's behaviour unchanged. Importing the module does not touch the console encoding or the error preference; `New-WorkflowShortcut` sets both for the length of a call, where the script set them at load.
+
+The two files are copies, deliberately, in the same way the `check.ps1` scripts around this repository are copies of each other. They may drift. The script stays a single file that can be copied to a machine and run with nothing else alongside it, which is the property that would be lost by making it a wrapper over the module, and the module stays importable without the script. A change to how a workflow is read or a shortcut is written needs making in both.
 
 ## What gets created
 
@@ -67,7 +97,7 @@ Every step, including the input values used, is appended to the run's log file.
 
 ## Prerequisite checks
 
-Before writing any files the setup script verifies, with a specific error message for each failure:
+Before writing any files the setup verifies, with a specific error message for each failure:
 
 - `gh` is on `PATH` and authenticated
 - the configured owner exists
@@ -84,7 +114,7 @@ If file creation fails part way through, anything already written is removed.
 - Workflows are dispatched by file name (for example `deploy.yml`), which is stable even if the workflow's display name changes.
 - Locating the new run is done by polling `gh run list` for a run by the current user created after dispatch. If someone else dispatches the same workflow on the same branch at the same moment, the wrong run could be picked up.
 - Fixed input values are stored in plain text in the generated `.ps1`.
-- Re-run the setup script to regenerate a shortcut after a workflow's inputs change. The generated files are not meant to be edited by hand.
+- Run the setup again to regenerate a shortcut after a workflow's inputs change. The generated files are not meant to be edited by hand.
 - The input list is read from the workflow YAML with `powershell-yaml`. Unusual YAML constructs may not parse.
 
 ## Troubleshooting
@@ -95,7 +125,7 @@ If file creation fails part way through, anything already written is removed.
 
 **powershell-yaml will not download**: the fetch is a plain HTTPS request to the PowerShell Gallery, so a proxy or a blocked host is the usual cause. The package is cached at `%TEMP%\powershell-yaml-<version>.zip`; delete it to force a fresh attempt.
 
-**powershell-yaml did not match its recorded hash**: the script deletes the package and stops rather than using it. That is either a corrupted download, in which case running it again is enough, or the file served for that version has changed, which is worth understanding before retrying. The expected value is the `$YamlSha256` line near the top of `New-WorkflowShortcut.ps1`, and it pins that exact version.
+**powershell-yaml did not match its recorded hash**: the script deletes the package and stops rather than using it. That is either a corrupted download, in which case running it again is enough, or the file served for that version has changed, which is worth understanding before retrying. The expected value is the `$YamlSha256` line in whichever of `New-WorkflowShortcut.ps1` and `DispatchDesk.psm1` you ran, and it pins that exact version. Each carries its own copy of the pin, so raising one and not the other leaves them disagreeing.
 
 **Workflow has no `workflow_dispatch` trigger**: add the following to the workflow file on the branch you want to run from:
 
@@ -113,8 +143,8 @@ on:
 
 `./check.ps1` runs PSScriptAnalyzer over this directory. It needs PowerShell
 7.4.6 or later, which is the analyzer's own floor and well above the 5.1 the
-tool itself supports, so it is a thing for whoever is editing the script rather
-than for whoever is running it. The `#Requires` line in `check.ps1` says 7.4,
+tool itself supports, so it is a thing for whoever is editing this directory
+rather than for whoever is running it. The `#Requires` line in `check.ps1` says 7.4,
 because `#Requires` cannot express a patch version; below 7.4.6 the module
 raises its own error saying so.
 
@@ -128,14 +158,16 @@ version and a hash together.
 `PSScriptAnalyzerSettings.psd1` turns three rules off, each with its reason
 written beside it. The one worth knowing about is `PSAvoidUsingWriteHost`: the
 console is this program's entire user interface, so `Write-Host` is the right
-call here, and the rule fires thirty nine times across this directory saying
+call here, and the rule fires sixty nine times across this directory saying
 otherwise. `check.ps1` passes that file to the analyzer explicitly rather than
 relying on it being found, which the analyzer would do anyway for a file of that
 name, because a check should say what it is checking against.
 
-The analyzer sees only the setup script. The runtime script it generates lives
-in a here-string, which is a string as far as PowerShell is concerned, so
-nothing checks that half. Read it with that in mind.
+The analyzer reads the setup script and the module, and no further than that in
+either. The runtime script both of them generate lives in a here-string, which
+is a string as far as PowerShell is concerned, so nothing checks that half.
+Read it with that in mind, and remember it is the half that runs every time a
+shortcut is used.
 
 ## History
 
@@ -149,7 +181,7 @@ come with it, so the history here starts at the move.
 so this tool has something real to be pointed at. It declares one required and one
 optional input of every type `workflow_dispatch` supports, which is `string`, `number`,
 `boolean`, `choice` and `environment`, so each of the prompting paths in the setup
-script can be exercised without inventing a workflow each time. The two environments it
+can be exercised without inventing a workflow each time. The two environments it
 offers, `the-undercroft` and `the-tavern`, exist in this repository for that reason
 alone and carry no protection rules.
 
