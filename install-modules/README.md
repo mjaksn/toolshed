@@ -97,7 +97,7 @@ nothing is written, so running this repeatedly is free.
 
 | Parameter | What it does |
 | --- | --- |
-| `-Edition` | `Core`, `Desktop` or `Both`. Defaults to `Core`. |
+| `-Edition` | `Core`, `Desktop` or `Both`. Defaults to `Core`. Windows only, since both directories are. |
 | `-Destination` | Install into these directories instead, whatever they are. No version is assumed for them, so nothing is held back on compatibility grounds. |
 | `-ShedPath` | The root of the shed. Defaults to the directory above this script. |
 | `-Name` | Install only the named modules. A name matching nothing is an error, because a typo that silently installs nothing is worse than a stop. |
@@ -112,8 +112,14 @@ rather than read off the console. `Action` is one of `Linked`, `Copied`,
 
 ## What it needs
 
-PowerShell 7 to run, whichever editions it installs for. It uses only what
-PowerShell and .NET ship with.
+Windows, and PowerShell 7 to run it in, whichever editions it installs for. It
+uses only what PowerShell and .NET ship with.
+
+The Windows part is not incidental. `-Edition` resolves the user module
+directories under Documents, and Windows PowerShell 5.1 exists nowhere else. On
+another platform that switch stops and says so, rather than building a path
+whose separator is an ordinary character in a directory name; `-Destination`
+names a directory outright and is the way through.
 
 ## Tests
 
@@ -121,7 +127,7 @@ PowerShell and .NET ship with.
 pwsh -File ./test.ps1
 ```
 
-43 cases, in plain PowerShell with no test framework, so there is nothing to
+46 cases, in plain PowerShell with no test framework, so there is nothing to
 install.
 
 Everything runs against a synthetic shed built in a temporary directory and
@@ -144,6 +150,10 @@ PowerShell 7 and Windows PowerShell 5.1.
 Symbolic links need Developer Mode or an elevated shell. Where they cannot be
 created, the link cases report as skipped rather than passing quietly, and the
 copy cases still run.
+
+Three cases cover the Windows guard by setting `$env:OS` to something else for
+the length of them, which is what the guard reads, and putting it back
+afterwards.
 
 `check.ps1` runs PSScriptAnalyzer over this directory and then those tests, and
 is what CI runs, on `windows-latest`, per `ci.json`. The analyzer is fetched

@@ -74,7 +74,7 @@ pointed at its own directory, with its own settings file, and passes the same
 way; the copies are deliberate and may drift. `cd RemoveNewline &&
 ./check.ps1` fetches the analyzer the same way, from the same cache, and then
 runs the module's tests, and `cd install-modules && ./check.ps1` does the same
-for that tool's 43 cases. `cd BasicUpsAdapter && bash ./check.sh` runs the
+for that tool's 46 cases. `cd BasicUpsAdapter && bash ./check.sh` runs the
 Node test suite with nothing to install, and `cd WinEvents && bash ./check.sh`
 installs the pinned test dependencies and runs pytest; the second is Windows
 only, because pywin32 is. `cd lock-hashes && bash ./check.sh` runs its
