@@ -1,14 +1,20 @@
 #Requires -Version 7.4
 <#
 .SYNOPSIS
-    Run PSScriptAnalyzer over this tool. Called by CI, and runnable by hand.
+    Run PSScriptAnalyzer over this tool, then its tests. Called by CI, and
+    runnable by hand.
 
 .DESCRIPTION
-    The module is fetched straight from the gallery as a package file, checked
-    against a recorded SHA256, and imported from where it was unpacked. It is
-    never installed. That is the house rule about pinning a dependency by both
-    version and hash, and Install-Module cannot do it: -RequiredVersion pins the
-    version and nothing checks what arrived.
+    The analyzer is fetched straight from the gallery as a package file,
+    checked against a recorded SHA256, and imported from where it was
+    unpacked. It is never installed. That is the house rule about pinning a
+    dependency by both version and hash, and Install-Module cannot do it:
+    -RequiredVersion pins the version and nothing checks what arrived.
+
+    The tests in test.ps1 run after the analyzer. They drive the module with
+    canned answers rather than talking to GitHub, but they do let it fetch
+    powershell-yaml the way a real first run would, so a gallery it cannot
+    reach fails them.
 
     The package is cached under the temporary directory, so running this twice
     in a row downloads once. The hash is checked on every run, including
@@ -64,14 +70,17 @@ Import-Module (Join-Path $root 'PSScriptAnalyzer.psd1')
 $settings = Join-Path $here 'PSScriptAnalyzerSettings.psd1'
 $findings = @(Invoke-ScriptAnalyzer -Path $here -Recurse -Settings $settings)
 
-if ($findings.Count -eq 0) {
-    Write-Host "PSScriptAnalyzer $Version found nothing."
-    exit 0
+if ($findings.Count -gt 0) {
+    $findings | ForEach-Object {
+        "{0}:{1}:{2} {3} {4}" -f (Split-Path $_.ScriptName -Leaf), $_.Line, $_.Column, $_.Severity, $_.RuleName
+        "    {0}" -f $_.Message
+    }
+    Write-Host ""
+    throw "PSScriptAnalyzer $Version reported $($findings.Count) finding(s)."
 }
+Write-Host "PSScriptAnalyzer $Version found nothing."
 
-$findings | ForEach-Object {
-    "{0}:{1}:{2} {3} {4}" -f (Split-Path $_.ScriptName -Leaf), $_.Line, $_.Column, $_.Severity, $_.RuleName
-    "    {0}" -f $_.Message
+& (Join-Path $here 'test.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "test.ps1 exited $LASTEXITCODE."
 }
-Write-Host ""
-throw "PSScriptAnalyzer $Version reported $($findings.Count) finding(s)."

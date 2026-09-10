@@ -138,9 +138,40 @@ on:
         default: hello
 ```
 
+## Tests
+
+```powershell
+pwsh -File ./test.ps1
+```
+
+88 cases, in plain PowerShell with no test framework, so there is nothing to
+install beyond what the module already fetches for itself.
+
+The suite runs inside the module's own session state, through
+`& (Get-Module DispatchDesk) { ... }`. That reaches the private helpers, which
+are most of the module and none of them exported, and it means a function
+defined in that scriptblock shadows the one a module function would otherwise
+call. `gh`, the console and every prompt are replaced that way, so the whole
+flow can be driven end to end with canned answers: no network, no GitHub token,
+and no shortcut landing on the desktop of whoever ran the tests. Because that
+trick is what everything else rests on, the first two cases prove it is in
+effect rather than assume it, and the suite stops if they fail.
+
+An answer queue stands in for the prompts and throws on a question it was not
+expecting, so a case that would have gone interactive fails instead of hanging.
+The module's `ActionsDir`, `LogsDir` and `Get-DesktopPath` are pointed at a
+temporary directory that is removed afterwards, so a full run really does write
+the `.cmd`, the `.ps1` and the `.lnk`, and the tests then read them back.
+
+The one thing not faked is `powershell-yaml`. It is fetched and hash checked
+exactly as a first run would do it, because parsing a workflow file is the part
+worth testing against the real parser rather than a stand-in. A machine that
+cannot reach the gallery cannot run these tests, which is already true of
+`check.ps1`.
+
 ## Checks
 
-`./check.ps1` runs PSScriptAnalyzer over this directory. It needs PowerShell
+`./check.ps1` runs PSScriptAnalyzer over this directory and then `test.ps1`. It needs PowerShell
 7.4.6 or later, which is the analyzer's own floor and well above the 5.1 the
 module itself supports, so it is a thing for whoever is editing this directory
 rather than for whoever is running it. The `#Requires` line in `check.ps1` says 7.4,
@@ -154,13 +185,22 @@ verifies nothing about what arrives. That is the same arrangement the module
 uses for powershell-yaml at run time, and raising either version means replacing
 a version and a hash together.
 
-`PSScriptAnalyzerSettings.psd1` turns three rules off, each with its reason
+`PSScriptAnalyzerSettings.psd1` turns four rules off, each with its reason
 written beside it. The one worth knowing about is `PSAvoidUsingWriteHost`: the
 console is this program's entire user interface, so `Write-Host` is the right
 call here, and the rule fires thirty three times across this directory saying
 otherwise. `check.ps1` passes that file to the analyzer explicitly rather than
 relying on it being found, which the analyzer would do anyway for a file of that
 name, because a check should say what it is checking against.
+
+Two more rules would fire, both only in `test.ps1` and both because it shadows
+`Read-Host`, `Write-Host` and `Get-Command` on purpose. Those are suppressed on
+the three functions themselves, with
+`[Diagnostics.CodeAnalysis.SuppressMessageAttribute]` inside each `param` block,
+rather than switched off for the directory, which would stop the rules watching
+the module. An attribute like that belongs inside the function and before
+`param`; put it above the `function` keyword and the analyzer reports
+`UnexpectedAttribute` and applies nothing.
 
 The analyzer reads the module and no further. The runtime script the module
 generates lives in a here-string, which is a string as far as PowerShell is

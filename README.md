@@ -97,9 +97,10 @@ Six tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
 from the gallery and verified against a recorded hash rather than installed, so
 what the check ran against is the same module every time. That is the same
 arrangement the tool already uses for powershell-yaml at run time, and for the
-same reason. `claude-sessions` runs a copy of that script pointed at its own
-directory, with its own settings file. `RemoveNewline` fetches the analyzer the
-same way and then runs its own tests, written in plain PowerShell.
+same reason, and it then runs its own tests. `claude-sessions` runs a copy of
+that analyzer script pointed at its own directory, with its own settings file.
+`RemoveNewline` fetches the analyzer the same way and then runs its own tests,
+written in plain PowerShell.
 `BasicUpsAdapter` runs its own test suite under `node --test`, with nothing to
 install first. `WinEvents` installs its test dependencies, pinned by version and
 hash, and runs `pytest`. `lock-hashes` runs its own tests under `unittest`, with

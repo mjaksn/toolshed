@@ -26,6 +26,13 @@
         # does change state, but it shows a summary and asks before writing
         # anything, so a -WhatIf would be a second confirmation bolted onto a
         # flow that already has one.
-        'PSUseShouldProcessForStateChangingFunctions'
+        'PSUseShouldProcessForStateChangingFunctions',
+
+        # test.ps1 calls its assertion helpers once per case with the case
+        # name, then the expected value, then the actual one, so that each case
+        # is one readable line. Naming three parameters on every one of them
+        # would double the length of the file for no clarity gained. It fires
+        # only there.
+        'PSAvoidUsingPositionalParameters'
     )
 }
