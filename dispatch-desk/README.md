@@ -20,7 +20,7 @@ Import-Module .\DispatchDesk.psd1
 New-WorkflowShortcut -Owner mjaksn
 ```
 
-To have PowerShell find it by name instead, copy `DispatchDesk.psd1` and `DispatchDesk.psm1` into a directory called `DispatchDesk` somewhere on `$env:PSModulePath`, such as `Documents\PowerShell\Modules`. It is then autoloaded on first use and the import line is unnecessary.
+To have PowerShell find it by name instead, copy `DispatchDesk.psd1` and `DispatchDesk.psm1` into a directory called `DispatchDesk` somewhere on `$env:PSModulePath`: `Documents\PowerShell\Modules` for PowerShell 7, or `Documents\WindowsPowerShell\Modules` for Windows PowerShell 5.1, which this module also supports. The two are separate and neither reads the other's, so a module wanted in both goes in both. It is then autoloaded on first use and the import line is unnecessary.
 
 If your execution policy blocks the import:
 
