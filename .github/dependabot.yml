@@ -27,13 +27,11 @@ updates:
   # only thing that keeps a hash pin from being a pin that never moves again.
   #
   # Not every pin in this repository has that. The PowerShell Gallery modules,
-  # powershell-yaml in dispatch-desk/New-WorkflowShortcut.ps1 and again in
-  # dispatch-desk/DispatchDesk.psm1, and PSScriptAnalyzer in
+  # powershell-yaml in dispatch-desk/DispatchDesk.psm1 and PSScriptAnalyzer in
   # dispatch-desk/check.ps1, claude-sessions/check.ps1 and
   # RemoveNewline/check.ps1, are each pinned as a version and a SHA256 in a
   # pair of variables. There is no manifest for Dependabot to read, so all of
-  # them have to be raised by hand. The two powershell-yaml pins move together,
-  # and so do the three analyzer pins.
+  # them have to be raised by hand, and the three analyzer pins move together.
   - package-ecosystem: pip
     directory: "/.github"
     schedule:

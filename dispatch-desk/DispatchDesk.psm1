@@ -5,17 +5,13 @@
     workflows (workflow_dispatch).
 
 .DESCRIPTION
-    The module form of New-WorkflowShortcut.ps1, exporting one command,
-    New-WorkflowShortcut. Three things differ from the script, and they are the
-    three things that make a module rather than a script:
+    Exports one command, New-WorkflowShortcut, which asks what to point a
+    shortcut at, checks every answer against GitHub, and writes the shortcut.
 
-      - the owner arrives as a parameter instead of a value edited into the file
-      - a failure throws instead of calling exit, which in a module would take
-        the caller's session down with it
-      - a run that succeeds returns an object describing what it wrote
-
-    Everything else, including every prompt and every prerequisite check, is the
-    script's behaviour unchanged.
+    This began as a single script, New-WorkflowShortcut.ps1, and the shape it
+    left behind is worth knowing: a failure throws rather than calling exit,
+    which in a module would take the caller's session down with it, and a run
+    that succeeds returns an object rather than only printing.
 
     Requirements:
       - Windows
@@ -49,9 +45,10 @@ function Write-Info {
 }
 
 function Stop-WithError {
-    # Removes anything already written, then throws. The script this came from
-    # printed the message itself and called exit; a module hands the message to
-    # the caller as an ordinary terminating error and lets them decide.
+    # Removes anything already written, then throws. Printing the message and
+    # calling exit, which is what this did as a script, would close the session
+    # that called it; a module hands the message to the caller as an ordinary
+    # terminating error and lets them decide.
     param([string[]]$Lines)
     $removed = @()
     foreach ($f in $script:CreatedFiles) {
@@ -405,6 +402,25 @@ function ConvertTo-PsLiteral {
     return "'" + ([string]$Value).Replace("'", "''") + "'"
 }
 
+function Resolve-Workflow {
+    # Picks one workflow out of the list by file name or by display name, both
+    # case-insensitively. Returns $null when nothing matches, so the caller can
+    # word its own error, and gives up when more than one matches, because
+    # choosing between two on the caller's behalf is worse than saying so.
+    param($Workflows, [string]$Name)
+    $matched = @($Workflows | Where-Object {
+        ([System.IO.Path]::GetFileName($_.path) -ieq $Name) -or ($_.name -ieq $Name)
+    })
+    if ($matched.Count -eq 1) { return $matched[0] }
+    if ($matched.Count -gt 1) {
+        Stop-WithError (@(
+            "More than one workflow answers to '$Name'.",
+            'Name it by file instead, one of:'
+        ) + @($matched | ForEach-Object { "  $([System.IO.Path]::GetFileName($_.path))" }))
+    }
+    return $null
+}
+
 function Get-DesktopPath {
     $desktop = [Environment]::GetFolderPath('Desktop')
     if (-not $desktop -or -not (Test-Path -LiteralPath $desktop)) {
@@ -676,10 +692,31 @@ function New-WorkflowShortcut {
     fails part way through, whatever was already written is removed and the
     command throws.
 
+    Every parameter but Owner is optional and only answers a question that would
+    otherwise be asked. Nothing is skipped by supplying one: a value given on the
+    command line is verified against GitHub exactly as a typed one is.
+
     .PARAMETER Owner
-    The GitHub user or organization that owns the repository. This is the one
-    thing the command cannot ask GitHub for, and it is where the script version
-    kept a variable to edit.
+    The GitHub user or organization that owns the repository. The one thing the
+    command cannot work out for itself, so it is the only required parameter.
+
+    .PARAMETER Repository
+    The repository name, without the owner. An owner/name pair is accepted and
+    the owner half ignored, since Owner already said. Prompted for when omitted.
+
+    .PARAMETER Branch
+    The branch to dispatch from, which is also the branch the workflow file is
+    read from. Prompted for when omitted, defaulting to the repository's default
+    branch.
+
+    .PARAMETER Workflow
+    The workflow, named either by its file name (deploy.yml) or by the display
+    name in the workflow file (Deploy), case-insensitively. Chosen from a
+    numbered list when omitted.
+
+    .PARAMETER ShortcutName
+    The name of the shortcut on the desktop, which also names the two runner
+    files. Prompted for when omitted, defaulting to "<repo> - <workflow name>".
 
     .OUTPUTS
     On success, one object carrying the owner, repository, branch, workflow and
@@ -691,12 +728,33 @@ function New-WorkflowShortcut {
     .EXAMPLE
     $shortcut = New-WorkflowShortcut -Owner my-org
     $shortcut.ShortcutPath
+
+    .EXAMPLE
+    New-WorkflowShortcut -Owner mjaksn -Repository toolshed -Branch main `
+        -Workflow dungeon-crawl.yml -ShortcutName 'Descend'
+
+    Answers every question except the workflow inputs and the confirmation,
+    which are still asked.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)]
         [ValidateNotNullOrEmpty()]
-        [string]$Owner
+        [string]$Owner,
+
+        # Deliberately not ValidateNotNullOrEmpty: an empty string means the
+        # same as not passing one at all, which is to ask.
+        [Parameter(Position = 1)]
+        [string]$Repository,
+
+        [Parameter(Position = 2)]
+        [string]$Branch,
+
+        [Parameter(Position = 3)]
+        [string]$Workflow,
+
+        [Parameter(Position = 4)]
+        [string]$ShortcutName
     )
 
     # Set here rather than at module scope: importing a module should not
@@ -767,8 +825,9 @@ function New-WorkflowShortcut {
 
     # --- repository ---
     Write-Step 'Repository'
-    $Repo = Read-Text -Prompt "Repository name (without the owner)" -Required
-    $Repo = $Repo -replace '^.*/', ''
+    if ($Repository) { Write-Info "Given: $Repository" }
+    else { $Repository = Read-Text -Prompt "Repository name (without the owner)" -Required }
+    $Repo = $Repository -replace '^.*/', ''
     $RepoSlug = "$Owner/$Repo"
     $repoResult = Invoke-GhApi "repos/$RepoSlug"
     if (-not $repoResult.Ok) {
@@ -795,7 +854,8 @@ function New-WorkflowShortcut {
 
     # --- branch ---
     Write-Step 'Branch'
-    $Branch = Read-Text -Prompt 'Branch to run the workflow from' -Default $repoInfo.default_branch -Required
+    if ($Branch) { Write-Info "Given: $Branch" }
+    else { $Branch = Read-Text -Prompt 'Branch to run the workflow from' -Default $repoInfo.default_branch -Required }
     $branchResult = Invoke-GhApi "repos/$RepoSlug/git/ref/heads/$Branch"
     if (-not $branchResult.Ok) {
         if ($branchResult.NotFound) {
@@ -821,16 +881,31 @@ function New-WorkflowShortcut {
             'Add a workflow file under .github/workflows on the default branch first.'
         )
     }
-    $wfLabels = @($workflows | ForEach-Object { "{0}  ({1})  [{2}]" -f $_.name, $_.path, $_.state })
-    $wfIndex = Select-FromList -Prompt 'Choose the workflow' -Items $wfLabels
-    $workflow = $workflows[$wfIndex]
-    $WorkflowName = $workflow.name
-    $WorkflowPath = $workflow.path
+    # $chosen rather than $workflow: PowerShell variable names are case
+    # insensitive, so assigning to $workflow here would quietly overwrite the
+    # -Workflow parameter, and nothing would warn about it.
+    if ($Workflow) {
+        $chosen = Resolve-Workflow -Workflows $workflows -Name $Workflow
+        if ($null -eq $chosen) {
+            Stop-WithError (@(
+                "No workflow in $RepoSlug is called '$Workflow'.",
+                'The name matches either the file or the display name. This repository has:'
+            ) + @($workflows | ForEach-Object { "  {0}  ({1})" -f $_.name, [System.IO.Path]::GetFileName($_.path) }))
+        }
+        Write-Info "Given: $($chosen.name) ($($chosen.path))"
+    }
+    else {
+        $wfLabels = @($workflows | ForEach-Object { "{0}  ({1})  [{2}]" -f $_.name, $_.path, $_.state })
+        $wfIndex = Select-FromList -Prompt 'Choose the workflow' -Items $wfLabels
+        $chosen = $workflows[$wfIndex]
+    }
+    $WorkflowName = $chosen.name
+    $WorkflowPath = $chosen.path
     $WorkflowFile = [System.IO.Path]::GetFileName($WorkflowPath)
 
-    if ($workflow.state -ne 'active') {
+    if ($chosen.state -ne 'active') {
         Stop-WithError @(
-            "Workflow '$WorkflowName' is not active (state: $($workflow.state)).",
+            "Workflow '$WorkflowName' is not active (state: $($chosen.state)).",
             'Enable it with:',
             "  gh workflow enable `"$WorkflowFile`" --repo $RepoSlug",
             'or from the Actions tab on GitHub, then run New-WorkflowShortcut again.'
@@ -930,7 +1005,8 @@ function New-WorkflowShortcut {
     # --- shortcut name ---
     Write-Step 'Shortcut'
     $defaultShortcutName = "$Repo - $WorkflowName"
-    $ShortcutName = Read-Text -Prompt 'Shortcut name' -Default $defaultShortcutName -Required
+    if ($ShortcutName) { Write-Info "Given: $ShortcutName" }
+    else { $ShortcutName = Read-Text -Prompt 'Shortcut name' -Default $defaultShortcutName -Required }
     $BaseName = ConvertTo-SafeFileName $ShortcutName
     $DesktopPath = Get-DesktopPath
     $CmdPath = Join-Path $script:ActionsDir "$BaseName.cmd"
