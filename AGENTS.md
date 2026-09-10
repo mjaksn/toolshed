@@ -63,9 +63,12 @@ version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
 Six tools have a check. `cd dispatch-desk && ./check.ps1` runs
-PSScriptAnalyzer over that directory and takes about a minute the first time,
-because it fetches the module, and seconds afterwards from the cache. It passes
-with nothing reported. `cd claude-sessions && ./check.ps1` is a copy of that
+PSScriptAnalyzer over that directory and then `test.ps1`, and takes about a
+minute the first time, because it fetches the analyzer and the YAML parser, and
+seconds afterwards from the cache. It passes with nothing reported and 88 cases
+passing. The tests drive the module with canned answers instead of talking to
+GitHub, so they need no token, but they do let it fetch powershell-yaml, which
+means a machine with no route to the PowerShell Gallery cannot run them. `cd claude-sessions && ./check.ps1` is a copy of that
 script pointed at its own directory, with its own settings file, and passes the
 same way; the copies are deliberate and may drift. `cd RemoveNewline &&
 ./check.ps1` fetches the analyzer the same way, from the same cache, and then

@@ -17,7 +17,7 @@ a repository of its own goes in here.
   you select. In C and in Python, the same program twice.
 - [claude-sessions](claude-sessions/), PowerShell scripts that record which Claude
   Code sessions are open in a console window and reopen them after a reboot.
-- [dispatch-desk](dispatch-desk/), a PowerShell script that creates Windows
+- [dispatch-desk](dispatch-desk/), a PowerShell module that creates Windows
   desktop shortcuts, each one dispatching a GitHub Actions workflow and then
   watching the run through to its conclusion.
 - [EdfiScripts](EdfiScripts/), simple batch scripts providing basic automation of
@@ -93,17 +93,19 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Five tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer,
-fetched from the gallery and verified against a recorded hash rather than
-installed, so what the check ran against is the same module every time. That is
-the same arrangement the tool already uses for powershell-yaml at run time, and
-for the same reason. `RemoveNewline` fetches the analyzer the same way and then
-runs its own tests, written in plain PowerShell. `BasicUpsAdapter` runs its own
-test suite under `node --test`, with nothing to install first. `WinEvents`
-installs its test dependencies, pinned by version and hash, and runs `pytest`.
-`lock-hashes` runs its own tests under `unittest`, with nothing to install.
-Those last three each keep the command in a `check.sh` beside its `ci.json`, so
-the check CI runs is one a person can run too.
+Six tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
+from the gallery and verified against a recorded hash rather than installed, so
+what the check ran against is the same module every time. That is the same
+arrangement the tool already uses for powershell-yaml at run time, and for the
+same reason, and it then runs its own tests. `claude-sessions` runs a copy of
+that analyzer script pointed at its own directory, with its own settings file.
+`RemoveNewline` fetches the analyzer the same way and then runs its own tests,
+written in plain PowerShell.
+`BasicUpsAdapter` runs its own test suite under `node --test`, with nothing to
+install first. `WinEvents` installs its test dependencies, pinned by version and
+hash, and runs `pytest`. `lock-hashes` runs its own tests under `unittest`, with
+nothing to install. Those last three each keep the command in a `check.sh`
+beside its `ci.json`, so the check CI runs is one a person can run too.
 
 ## Licence
 

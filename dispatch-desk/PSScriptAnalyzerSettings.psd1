@@ -1,25 +1,38 @@
-# Rules switched off for this tool, each because it is aimed at a module that
-# exports cmdlets to other code and this is a program a person runs.
+# Rules switched off for this tool. Each is aimed at code that other code
+# calls, and this module is an interactive program a person sits in front of.
+# It does export a command, so these are not switched off for want of a
+# manifest; they are switched off because a numbered list and a Read-Host are
+# what the command is.
 #
 # Everything not named here stays on, including PSReviewUnusedParameter, which
-# is the rule that earns its keep in a script this size.
+# is the rule that earns its keep in a module this size.
 @{
     ExcludeRules = @(
         # The console is the entire user interface. This program exists to
         # print a numbered list, colour a warning and ask a question, so
         # Write-Host is the correct call rather than a lapse, and the rule
-        # fires thirty nine times across this directory saying otherwise,
-        # thirty six of them in the setup script and three in check.ps1.
+        # fires thirty three times across this directory saying otherwise,
+        # thirty of them in the module and three in check.ps1.
         'PSAvoidUsingWriteHost',
 
         # Get-WorkflowDispatchInputs returns every input a workflow declares.
-        # The plural is what the function does.
+        # The plural is what the function does. It is the only hit.
         'PSUseSingularNouns',
 
-        # Stop-WithError prints a message and exits. The rule reads the Stop
-        # verb as a cmdlet that changes system state and asks for ShouldProcess
-        # support, which would put a confirmation prompt in front of an error
-        # message.
-        'PSUseShouldProcessForStateChangingFunctions'
+        # Two functions trip this. Stop-WithError prints a message and gives
+        # up; the rule reads the Stop verb as a cmdlet that changes system
+        # state and asks for ShouldProcess support, which would put a
+        # confirmation prompt in front of an error message. New-WorkflowShortcut
+        # does change state, but it shows a summary and asks before writing
+        # anything, so a -WhatIf would be a second confirmation bolted onto a
+        # flow that already has one.
+        'PSUseShouldProcessForStateChangingFunctions',
+
+        # test.ps1 calls its assertion helpers once per case with the case
+        # name, then the expected value, then the actual one, so that each case
+        # is one readable line. Naming three parameters on every one of them
+        # would double the length of the file for no clarity gained. It fires
+        # only there.
+        'PSAvoidUsingPositionalParameters'
     )
 }
