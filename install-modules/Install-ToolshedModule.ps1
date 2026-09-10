@@ -147,6 +147,18 @@ function Get-ModuleDestination {
     # Documents folder, OneDrive being the usual one, is handled.
     param([string]$Edition)
 
+    # Both of these are Windows locations, and Windows PowerShell exists
+    # nowhere else. Built on another platform the separator in
+    # 'PowerShell\Modules' would be an ordinary character in a directory name,
+    # and the module would land somewhere no PSModulePath looks, which is worse
+    # than stopping. dispatch-desk guards the same way for the same reason.
+    if (-not ($env:OS -eq 'Windows_NT')) {
+        throw @(
+            'The -Edition directories are Windows locations and this is not Windows.',
+            'Pass -Destination with a directory that is already on $env:PSModulePath.'
+        ) -join [Environment]::NewLine
+    }
+
     $documents = [Environment]::GetFolderPath('MyDocuments')
     if (-not $documents) {
         throw 'Could not determine the Documents folder for the current user. Pass -Destination instead.'

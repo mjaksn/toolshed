@@ -271,6 +271,25 @@ try {
     Assert-Equal "a module asking for $exact is installed on $running" 'WouldLink' ($onCoreNow | Where-Object Name -eq 'ExactModule').Action
     Assert-Equal 'a module asking for a version nobody has is held back' 'Incompatible' ($onCoreNow | Where-Object Name -eq 'FutureModule').Action
 
+    # The edition directories are Windows locations, so asking for one anywhere
+    # else has to stop rather than build a path with a separator in it that is
+    # just a character. The guard reads $env:OS, which is what makes it testable
+    # from here, and is the same check dispatch-desk makes.
+    $realOs = $env:OS
+    try {
+        $env:OS = 'Something_Else'
+        Assert-Throw 'an edition asked for off Windows stops' {
+            & $installer -ShedPath $shed -Edition Core -WhatIf
+        } 'not Windows'
+        Assert-Throw 'and it says to use -Destination' {
+            & $installer -ShedPath $shed -Edition Both -WhatIf
+        } '-Destination'
+        # -Destination names the directory itself, so it is not held to that.
+        $offWindows = @(& $installer -ShedPath $shed -Destination (Get-FreshDestination) -Copy -Name BetaModule)
+        Assert-Equal 'but an explicit destination still works' 'Copied' $offWindows[0].Action
+    }
+    finally { $env:OS = $realOs }
+
     # An explicit destination carries no version, so nothing is held back.
     $result = @(& $installer -ShedPath $shed -Destination (Get-FreshDestination) -Copy -Name GammaModule)
     Assert-Equal 'an explicit destination holds nothing back' 'Copied' $result[0].Action
