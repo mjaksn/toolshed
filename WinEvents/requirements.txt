@@ -2,10 +2,6 @@
 #
 #     pip install --require-hashes --requirement requirements.txt
 #
-# --require-hashes is the half that matters. Left off, pip takes the version and
-# ignores the hashes entirely, which looks identical in a diff and verifies
-# nothing.
-#
 # Every pywin32 wheel published under this version is listed, one hash each,
 # because which one pip downloads depends on the Python version and the
 # architecture of the machine doing the installing. A platform not listed fails
