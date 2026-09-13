@@ -140,7 +140,7 @@ Plain PowerShell, no framework. Each case builds a small project in a temporary
 directory with a bare repository beside it standing in for `origin`, so pushes
 and tags happen for real without a network. `gh` and every prompt are replaced
 with fakes, and git runs against a throwaway global configuration so nothing
-on the machine running the tests can change the result. 87 cases.
+on the machine running the tests can change the result. 95 cases.
 
 `./check.ps1` runs PSScriptAnalyzer over this directory and then the tests.
 It fetches the analyzer from the PowerShell Gallery, pinned by version and

@@ -487,6 +487,18 @@ try {
         Assert-Equal 'and a file with no mark gains none' ([byte][char]'[') $bytes[0]
     }
 
+    # A push URL that goes nowhere fails the push while ls-remote, which reads
+    # the fetch URL, still passes every check before it.
+    $repo = Build-Fixture
+    Invoke-TestGit $repo remote set-url --push origin (Join-Path $work 'no-such-remote.git') | Out-Null
+    Assert-Throw 'a failed branch push says the commit is local' { Invoke-Release $repo @('1', '0.6.0', 'y') } 'only on the local branch release-0.6.0'
+    Assert-Equal 'and it is' 'Release 0.6.0' "$(Invoke-TestGit $repo log -1 --format=%s)"
+
+    $repo = Build-Fixture -Files (Get-SampleFile -Changelog $ChangelogReleased)
+    Invoke-TestGit $repo remote set-url --push origin (Join-Path $work 'no-such-remote.git') | Out-Null
+    Assert-Throw 'a failed tag push says the tag is local' { Invoke-Release $repo @('2', 'y') } 'git tag --delete v0.5.1'
+    Assert-Equal 'and it is' 'tag' "$(Invoke-TestGit $repo cat-file -t v0.5.1)"
+
     Invoke-Scenario 'bump declined before the push' {
         $repo = Build-Fixture
         Invoke-Release $repo @('1', '0.6.0', 'n')

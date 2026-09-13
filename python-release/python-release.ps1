@@ -510,7 +510,12 @@ function Invoke-VersionBump {
         Write-Host "Stopped before pushing. The commit is on the local branch $branch; push it with: git push -u $($script:Remote) $branch"
         return
     }
-    Invoke-Git -Repository $Repository -Arguments @('push', '--quiet', '--set-upstream', $script:Remote, $branch) | Out-Null
+    try {
+        Invoke-Git -Repository $Repository -Arguments @('push', '--quiet', '--set-upstream', $script:Remote, $branch) | Out-Null
+    }
+    catch {
+        throw "Pushing $branch failed, so the commit ""Release $new"" is only on the local branch $branch, which is still checked out. Running this again would stop because the checkout is not on $($script:MainBranch). Push it by hand with: git push -u $($script:Remote) $branch. $($_.Exception.Message)"
+    }
     Write-Host "Pushed $branch."
 
     Write-Host ''
@@ -566,7 +571,12 @@ function Invoke-ReleaseTag {
         return
     }
     Invoke-Git -Repository $Repository -Arguments @('tag', '--annotate', $tag, '--message', $tag) | Out-Null
-    Invoke-Git -Repository $Repository -Arguments @('push', '--quiet', $script:Remote, "refs/tags/$tag") | Out-Null
+    try {
+        Invoke-Git -Repository $Repository -Arguments @('push', '--quiet', $script:Remote, "refs/tags/$tag") | Out-Null
+    }
+    catch {
+        throw "Pushing $tag failed, so the tag exists only locally. Running this again would stop because the tag already exists locally. Push it by hand with: git push $($script:Remote) refs/tags/$tag, or remove it with: git tag --delete $tag. $($_.Exception.Message)"
+    }
     Write-Host "Pushed $tag to $($script:Remote)."
 }
 

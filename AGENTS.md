@@ -75,7 +75,7 @@ way; the copies are deliberate and may drift. `cd RemoveNewline &&
 ./check.ps1` fetches the analyzer the same way, from the same cache, and then
 runs the module's tests, `cd install-modules && ./check.ps1` does the same
 for that tool's 46 cases, and `cd python-release && ./check.ps1` does it for
-that script's 87, which need git and nothing else, because each builds a
+that script's 95, which need git and nothing else, because each builds a
 throwaway project with a bare repository standing in for origin and fakes gh
 and the prompts. `cd BasicUpsAdapter && bash ./check.sh` runs the
 Node test suite with nothing to install, and `cd WinEvents && bash ./check.sh`
