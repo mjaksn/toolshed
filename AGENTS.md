@@ -50,19 +50,20 @@ tool is set up by following its own README.
 | Format | none configured |
 | Run | per tool, see its README |
 
-`ruff check .` was run in this checkout and passes. It covers four places
+`ruff check .` was run in this checkout and passes. It covers five places
 now: `apitrace/apitrace.py`, which carries its own `apitrace/ruff.toml`
 switching off three stylistic rules for that one file with a reason beside
 each; the two files in `WinEvents`, which carry a `WinEvents/ruff.toml` of the
-same kind; the two files in `lock-hashes`, which pass on the defaults and carry
-no `ruff.toml`; and `.github/changed_tools.py`, the CI plumbing. It runs
+same kind; the two files in `lock-hashes` and the five in `ha-rest-yaml`, which
+pass on the defaults and carry no `ruff.toml`; and `.github/changed_tools.py`,
+the CI plumbing. It runs
 repository-wide and unconditionally, so any Python that lands is linted on
 arrival whatever else a change touched. CI installs ruff from
 `.github/requirements-lint.txt`, pinned by version and hash, so the same
 version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-Eight tools have a check. `cd dispatch-desk && ./check.ps1` runs
+Nine tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and then `test.ps1`, and takes about a
 minute the first time, because it fetches the analyzer and the YAML parser,
 and seconds afterwards from the cache. It passes with nothing reported and 88
@@ -81,8 +82,9 @@ and the prompts. `cd BasicUpsAdapter && bash ./check.sh` runs the
 Node test suite with nothing to install, and `cd WinEvents && bash ./check.sh`
 installs the pinned test dependencies and runs pytest; the second is Windows
 only, because pywin32 is. `cd lock-hashes && bash ./check.sh` runs its
-unittest suite with nothing to install. Every one of these was run in this
-checkout and passes.
+unittest suite with nothing to install, and `cd ha-rest-yaml && bash
+./check.sh` does the same for that tool's 4 tests. Every one of these was run
+in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
 If one is added without running it, mark it `UNVERIFIED` rather than implying
