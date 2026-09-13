@@ -59,10 +59,14 @@ For a command, every endpoint using GET, PATCH, POST, PUT or DELETE is listed,
 and when the endpoint has optional parameters a second list asks which to
 include. Required ones are always included. Each parameter becomes a template
 variable, filled from the data the action is called with, so a path parameter
-`zone` turns the URL into `.../zones/{{ zone }}/...`. Query parameters go into
-the URL, because `rest_command` has no `params` key. The properties of a JSON
-request body count as parameters too, and go into a JSON `payload`. The tool
-prints the name of each variable the action will want.
+`zone` turns the URL into `.../zones/{{ zone | urlencode }}/...`. Query
+parameters go into the URL too, because `rest_command` has no `params` key.
+Values in the URL pass through `urlencode`, so an `&` or `#` in one stays part
+of the value, though a `/` is left as it is. The properties of a JSON request
+body count as parameters as well, and go into a JSON `payload`. Two parameters
+whose names would make the same variable, such as a query and a header both
+called `id`, get the location added to tell them apart. The tool prints the
+name of each variable the action will want.
 
 ## What it trusts
 

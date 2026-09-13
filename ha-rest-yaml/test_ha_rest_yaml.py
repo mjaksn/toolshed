@@ -145,7 +145,7 @@ binary_sensor:
             """\
 rest_command:
   set_target:
-    url: 'http://thermostat.local:8080/api/zones/{{ zone }}/target?hold-for={{ hold_for }}'
+    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?hold-for={{ hold_for | urlencode }}'
     method: put
     authentication: digest
     username: YOUR_USERNAME

@@ -32,8 +32,12 @@ def generate(endpoints, base_url, extra, console):
     params = [p for p in endpoint.params if p.required or p in picked]
 
     path_variables = {p.name: p.variable for p in endpoint.params if p.location == "path"}
-    url = base_url + re.sub(r"\{([^}]*)\}", lambda m: "{{ " + path_variables[m.group(1)] + " }}", endpoint.path)
-    query = [f"{p.name}={{{{ {p.variable} }}}}" for p in params if p.location == "query"]
+    # Values reaching the url are encoded, so an & or # in one cannot add a query
+    # parameter or start a fragment once Home Assistant parses what it rendered.
+    url = base_url + re.sub(
+        r"\{([^}]*)\}", lambda m: "{{ " + path_variables[m.group(1)] + " | urlencode }}", endpoint.path
+    )
+    query = [f"{p.name}={{{{ {p.variable} | urlencode }}}}" for p in params if p.location == "query"]
     if query:
         url += "?" + "&".join(query)
     config = {"url": url}
