@@ -337,7 +337,8 @@ def yaml_scalar(value) -> str:
 
 
 def yaml_key(key: str) -> str:
-    return key if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]*", key) else yaml_scalar(key)
+    """A mapping key, through the same quoting as a value, so on or 123 stays a string."""
+    return yaml_scalar(str(key))
 
 
 def to_yaml(data, indent: int = 0) -> list[str]:
