@@ -145,14 +145,19 @@ class Spec:
             endpoint.json_request = is_json(media_type)
             endpoint.body_required = bool(body.get("required"))
             schema = self.merged(media.get("schema"))
-            if endpoint.json_request and schema.get("properties"):
+            # readOnly properties belong to responses only, so a request leaves them out.
+            properties = [
+                name for name, child in (schema.get("properties") or {}).items()
+                if not self.merged(child).get("readOnly")
+            ]
+            if endpoint.json_request and properties:
                 # A property the schema requires is only required outright when
                 # the body it belongs to has to be sent at all. Otherwise it is
                 # needed as soon as any part of the body is.
                 needed = set(schema.get("required") or [])
                 endpoint.params += [
                     Param(name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed)
-                    for name in schema["properties"]
+                    for name in properties
                 ]
             else:
                 endpoint.params.append(Param("payload", "raw body", endpoint.body_required))
