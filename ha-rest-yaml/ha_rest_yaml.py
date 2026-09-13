@@ -238,7 +238,9 @@ class Spec:
             if path:
                 out.append((path, "object"))
             for name, child in (schema.get("properties") or {}).items():
-                self.walk_schema(child, [*path, name], out, depth + 1)
+                # writeOnly properties are only ever sent, never returned.
+                if not self.merged(child).get("writeOnly"):
+                    self.walk_schema(child, [*path, name], out, depth + 1)
         elif path:
             out.append((path, kind or "value"))
 
