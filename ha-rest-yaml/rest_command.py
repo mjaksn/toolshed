@@ -66,7 +66,10 @@ def generate(endpoints, base_url, extra, console):
     if "payload" in config:
         config["content_type"] = endpoint.body_type
 
+    # Home Assistant registers its own rest_command.reload after the configured
+    # commands, which would replace a command of that name.
+    key = "reload_command" if endpoint.slug == "reload" else endpoint.slug
     variables = sorted(p.variable for p in params)
     if variables:
-        console.say(f"Call rest_command.{endpoint.slug} with data for: {', '.join(variables)}")
-    return {"rest_command": {endpoint.slug: config}}
+        console.say(f"Call rest_command.{key} with data for: {', '.join(variables)}")
+    return {"rest_command": {key: config}}
