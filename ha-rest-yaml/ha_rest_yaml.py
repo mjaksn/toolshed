@@ -79,6 +79,7 @@ class Endpoint:
     params: list[Param] = field(default_factory=list)
     body_type: str | None = None  # the request body's media type, if it has one
     json_request: bool = False
+    body_required: bool = False  # whether the request body itself must be sent
     # Each value in a JSON response body: a label for the menu, and the Jinja
     # expression reaching it. Empty when the response is not JSON.
     values: list[tuple[str, str]] = field(default_factory=list)
@@ -145,15 +146,17 @@ class Spec:
         if media_type:
             endpoint.body_type = media_type
             endpoint.json_request = is_json(media_type)
+            endpoint.body_required = bool(body.get("required"))
             schema = self.merged(media.get("schema"))
             if endpoint.json_request and schema.get("properties"):
-                required = set(schema.get("required") or [])
+                # A property the schema requires is only required when the body
+                # it belongs to has to be sent at all.
+                required = set(schema.get("required") or []) if endpoint.body_required else set()
                 endpoint.params += [
                     Param(name, "body", name in required) for name in schema["properties"]
                 ]
             else:
-                required = bool(body.get("required"))
-                endpoint.params.append(Param("payload", "raw body", required))
+                endpoint.params.append(Param("payload", "raw body", endpoint.body_required))
 
         response = self.resolve(self.success_response(operation.get("responses")))
         media_type, media = self.pick_media(response.get("content"))

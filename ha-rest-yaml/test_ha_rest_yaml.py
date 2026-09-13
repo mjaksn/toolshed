@@ -39,6 +39,7 @@ SPEC = {
                 "operationId": "setTarget",
                 "parameters": [{"name": "hold-for", "in": "query"}, {"name": "X-Trace", "in": "header"}],
                 "requestBody": {
+                    "required": True,
                     "content": {
                         "application/json": {
                             "schema": {

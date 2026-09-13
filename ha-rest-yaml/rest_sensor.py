@@ -60,7 +60,7 @@ def entity(endpoints, base_url, extra, console, kind, hint=""):
     headers = {p.name: p.placeholder for p in required if p.location == "header"}
     if params:
         config["params"] = params
-    if endpoint.method == "post" and endpoint.body_type:
+    if endpoint.method == "post" and endpoint.body_required:
         body = [p for p in required if p.location == "body"]
         # An object of known properties; anything else, an array or a free-form
         # body, is left as a token rather than guessed at.

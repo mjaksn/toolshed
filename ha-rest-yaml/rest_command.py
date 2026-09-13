@@ -58,6 +58,9 @@ def generate(endpoints, base_url, extra, console):
         config["payload"] = "{" + fields + "}"
     elif any(p.location == "raw body" for p in params):
         config["payload"] = "{{ payload }}"
+    elif endpoint.body_required and endpoint.json_request:
+        # A body that must be sent, with none of its properties chosen.
+        config["payload"] = "{}"
     if "payload" in config:
         config["content_type"] = endpoint.body_type
 
