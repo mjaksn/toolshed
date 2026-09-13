@@ -191,6 +191,11 @@ class Spec:
 
     def merged(self, schema, depth=0):
         """A schema with allOf folded in and the first oneOf or anyOf branch taken."""
+        if isinstance(schema, dict) and "$ref" in schema and len(schema) > 1:
+            # OpenAPI 3.1 lets keywords sit beside a $ref, and both apply, which
+            # is what allOf already means.
+            siblings = {key: value for key, value in schema.items() if key != "$ref"}
+            schema = {**siblings, "allOf": [{"$ref": schema["$ref"]}, *siblings.get("allOf", [])]}
         schema = self.resolve(schema)
         parts = [*schema.get("allOf", []), *(schema.get("oneOf") or schema.get("anyOf") or [])[:1]]
         if not parts or depth > 12:
