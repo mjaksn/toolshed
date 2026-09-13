@@ -16,10 +16,6 @@ import re
 
 METHODS = ("get", "patch", "post", "put", "delete")
 
-# Names Jinja reads as a literal or an operator rather than a variable, kept in
-# step with the copy in ha_rest_yaml.py.
-JINJA_WORDS = {"true", "false", "none", "True", "False", "None", "and", "or", "not", "in", "is", "if", "else"}
-
 
 def generate(endpoints, base_url, extra, console):
     endpoints = [endpoint for endpoint in endpoints if endpoint.method in METHODS]
@@ -35,7 +31,8 @@ def generate(endpoints, base_url, extra, console):
         picked = [optional[i] for i in console.choose_many("Which optional parameters should it include?", labels)]
     params = [p for p in endpoint.params if p.required or p in picked]
 
-    url = base_url + re.sub(r"\{([^}]*)\}", lambda m: "{{ " + variable(m.group(1)) + " }}", endpoint.path)
+    path_variables = {p.name: p.variable for p in endpoint.params if p.location == "path"}
+    url = base_url + re.sub(r"\{([^}]*)\}", lambda m: "{{ " + path_variables[m.group(1)] + " }}", endpoint.path)
     query = [f"{p.name}={{{{ {p.variable} }}}}" for p in params if p.location == "query"]
     if query:
         url += "?" + "&".join(query)
@@ -64,15 +61,7 @@ def generate(endpoints, base_url, extra, console):
     if "payload" in config:
         config["content_type"] = endpoint.body_type
 
-    variables = sorted({p.variable for p in params} | set(re.findall(r"\{\{ (\w+) ", url)))
+    variables = sorted(p.variable for p in params)
     if variables:
         console.say(f"Call rest_command.{endpoint.slug} with data for: {', '.join(variables)}")
     return {"rest_command": {endpoint.slug: config}}
-
-
-def variable(name):
-    """A parameter name as a Jinja variable, the way Param.variable spells it."""
-    name = re.sub(r"\W", "_", name)
-    if name in JINJA_WORDS:
-        return name + "_"
-    return f"_{name}" if name[:1].isdigit() else name

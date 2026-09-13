@@ -56,14 +56,8 @@ class Param:
     # body for a request body whose properties are unknown.
     location: str
     required: bool
-
-    @property
-    def variable(self) -> str:
-        """The name as a Jinja variable, for templates filled from service data."""
-        slug = re.sub(r"\W", "_", self.name)
-        if slug in JINJA_WORDS:
-            return slug + "_"
-        return f"_{slug}" if slug[:1].isdigit() else slug
+    # The Jinja variable filled from service data, unique within its endpoint.
+    variable: str = ""
 
     @property
     def placeholder(self) -> str:
@@ -132,7 +126,8 @@ class Spec:
         operation_id = operation.get("operationId") or ""
         title = operation.get("summary") or operation_id
         endpoint = Endpoint(method, path, title, slug(operation_id or f"{method}_{path}"))
-        params = {}
+        # Every {segment} of the path, declared or not, so the url can be filled.
+        params = {(name, "path"): Param(name, "path", True) for name in re.findall(r"\{([^}]*)\}", path)}
         for raw in [*shared, *(operation.get("parameters") or [])]:
             raw = self.resolve(raw)
             location = raw.get("in")
@@ -157,6 +152,7 @@ class Spec:
                 ]
             else:
                 endpoint.params.append(Param("payload", "raw body", endpoint.body_required))
+        name_variables(endpoint.params)
 
         response = self.resolve(self.success_response(operation.get("responses")))
         media_type, media = self.pick_media(response.get("content"))
@@ -254,6 +250,30 @@ def walk_example(value, path, out, depth):
     elif path:
         kinds = {bool: "boolean", int: "integer", float: "number", str: "string"}
         out.append((path, kinds.get(type(value), "value")))
+
+
+def name_variables(params: list[Param]) -> None:
+    """Give each parameter a Jinja variable no other parameter of the endpoint shares.
+
+    A query and a header parameter can both be called id, and foo-bar and foo_bar
+    read the same once made identifiers, so a clash takes the location as a
+    suffix, and a number after that if it still clashes.
+    """
+    taken = set()
+    for param in params:
+        base = re.sub(r"\W", "_", param.name)
+        if base in JINJA_WORDS:
+            base += "_"
+        elif not base.isidentifier():
+            base = "_" + base
+        name = base
+        if name in taken:
+            name = base + "_" + param.location.replace(" ", "_")
+        number = 2
+        while name in taken:
+            name, number = f"{base}_{number}", number + 1
+        taken.add(name)
+        param.variable = name
 
 
 def is_json(media_type: str) -> bool:
