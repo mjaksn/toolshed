@@ -346,6 +346,14 @@ try {
     Assert-Throw 'a section with nothing after it is ambiguous' {
         Get-ChangelogSection -Text "## [1.0.0] - 2026-01-01`n`n- x`n" -Version '1.0.0'
     } 'ambiguous'
+    Invoke-Scenario 'changelog link references' {
+        Assert-Equal 'an [Unreleased] link ends the last section' '- first' `
+            (Get-ChangelogSection -Text "## [0.1.0] - 2026-01-01`n`n- first`n`n[Unreleased]: https://example.invalid/compare/v0.1.0...HEAD`n[0.1.0]: https://example.invalid/v0.1.0`n" -Version '0.1.0')
+        Assert-Equal 'and ends it when it is the only link' '- first' `
+            (Get-ChangelogSection -Text "## [0.1.0] - 2026-01-01`n`n- first`n`n[Unreleased]: https://example.invalid/compare/v0.1.0...HEAD`n" -Version '0.1.0')
+        Assert-Equal 'a Markdown link inside a section does not end it' "- see [the docs](https://example.invalid).`n- and more." `
+            (Get-ChangelogSection -Text "## [0.1.0] - x`n`n- see [the docs](https://example.invalid).`n- and more.`n`n[0.1.0]: u`n" -Version '0.1.0')
+    }
 
     Assert-True 'a compare link is copied from the newest one' `
         ((Add-ChangelogLink -Text $released -CurrentVersion '0.5.1' -NewVersion '0.6.0').Contains("`n[0.6.0]: https://github.com/example/sample/compare/v0.5.1...v0.6.0`n[0.5.1]: "))
@@ -459,6 +467,10 @@ try {
         Assert-True 'src/<package>/__init__.py is bumped' ((Read-Fixture $repo 'src/sample_pkg/__init__.py') -clike '*__version__ = "0.6.0"*')
     }
 
+    $files = Get-SampleFile
+    $files['src/sample_pkg/__init__.py'] = $files['sample_pkg/__init__.py']
+    Assert-Throw 'both package layouts at once are ambiguous' { Invoke-Release (Build-Fixture -Files $files) @('1') } 'Both sample_pkg/__init__.py and src/sample_pkg/__init__.py exist'
+
     Invoke-Scenario 'bump keeps CRLF' {
         $repo = Build-Fixture -Files (Get-SampleFile -Changelog $ChangelogReleased) -Crlf @('pyproject.toml', 'CHANGELOG.md')
         Invoke-Release $repo @('1', '0.5.2', '- The widget.', '.', 'y', 'y')
@@ -546,6 +558,10 @@ try {
     $repo = Build-Fixture -Files $files
     Assert-Throw 'a pyproject.toml with no static version is refused' { Invoke-Release $repo @('1') } 'no version = "..." line'
 
+    $files = Get-SampleFile
+    $files['docs/openapi.json'] = '{"openapi":"3.1.0","info":{"title":"sample","version":"0.5.1"}}'
+    Assert-Throw 'an openapi.json whose version cannot be found is refused' { Invoke-Release (Build-Fixture -Files $files) @('1') } 'docs/openapi.json has no "version": "..." line'
+
     $repo = Build-Fixture
     Invoke-TestGit $repo switch --quiet --create feature | Out-Null
     Assert-Throw 'a checkout off main is refused' { Invoke-Release $repo @('1') } "on the branch 'feature'"
@@ -619,6 +635,10 @@ try {
     $repo = Build-Fixture -Files (Get-SampleFile -Changelog $ChangelogReleased)
     Add-Content -LiteralPath (Join-Path $repo 'pyproject.toml') -Value '# edited'
     Assert-Throw 'a changed tracked file is refused before tagging' { Invoke-Release $repo @('2') } 'pyproject.toml'
+
+    $repo = Build-Fixture -Files (Get-SampleFile -Version '1.2' -Changelog ($ChangelogReleased -replace '0\.5\.1', '1.2'))
+    Assert-Throw 'a version that is not X.Y.Z is refused before tagging' { Invoke-Release $repo @('2') } 'v1.2 would not be the vX.Y.Z tag'
+    Assert-Equal 'and no tag is made' '' "$(Invoke-TestGit $repo tag --list)"
 }
 finally {
     $env:GIT_CONFIG_GLOBAL = $savedGlobal

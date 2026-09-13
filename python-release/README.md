@@ -70,7 +70,8 @@ it:
 1. refuses a checkout with staged or unstaged changes to tracked files, because
    the version is read from the files on disk and has to be the version of the
    commit being tagged;
-2. reads the version and refuses if the places disagree;
+2. reads the version and refuses if the places disagree, or if it is not of
+   the `MAJOR.MINOR.PATCH` form a `vX.Y.Z` tag needs;
 3. refuses if `CHANGELOG.md` has no non-empty `## [X.Y.Z]` section, since the
    release workflows fail on exactly that;
 4. refuses if `vX.Y.Z` already exists locally or on `origin`;
@@ -89,9 +90,9 @@ is what most of them already use.
 | File | Line | |
 | --- | --- | --- |
 | `pyproject.toml` | `version = "X.Y.Z"` | required, exactly one |
-| `<package>/__init__.py` or `src/<package>/__init__.py` | `__version__ = "X.Y.Z"` | required, exactly one |
+| `<package>/__init__.py` or `src/<package>/__init__.py`, not both | `__version__ = "X.Y.Z"` | required, exactly one |
 | `README.md` | `<package>.__version__  # "X.Y.Z"` | if present, every one |
-| `docs/openapi.json` | `"version": "X.Y.Z"` | if present, exactly one |
+| `docs/openapi.json` | `"version": "X.Y.Z"` | if the file exists, exactly one |
 
 `<package>` is the `name` from `pyproject.toml`, lower cased, with hyphens and
 dots turned into underscores. Only the `pyproject.toml` at the root counts, so
@@ -100,7 +101,9 @@ the nested ones under a project's `tools` directory are left alone.
 The README line is the example netflume and lanname show of reading
 `__version__`. `docs/openapi.json` is readerboard's generated API description,
 which its CI compares byte for byte with a fresh one; only that one line is
-replaced, and the file is never parsed and rewritten.
+replaced, and the file is never parsed and rewritten. An OpenAPI description
+always carries a version, so a `docs/openapi.json` without that line, a
+minified one for instance, is refused rather than skipped and left behind.
 
 Edits are replacements inside the text as it was read, and each file is written
 back in the encoding it was read in, so line endings, the encoding and any byte
@@ -124,11 +127,13 @@ When it adds a heading and the file has no link for it yet, it copies the
 shape of the newest existing link: a compare link from the previous version,
 as lanname uses, or a link to the release page, as the other three do.
 
-The pull request body, and the check on the tag path, lift the section out
-with the same pattern the release workflows use for the release notes: from
-the heading to the next `## [` heading or the first link reference. More than
-one heading for the version, a section with nothing after it, or an empty
-section is an error.
+The pull request body, and the check on the tag path, lift the section out from
+the heading to the next `## [` heading or the first link reference definition,
+such as `[0.6.0]: https://...` or `[Unreleased]: https://...`. That is nearly
+the pattern the release workflows use for the release notes; they stop only at
+a definition starting with a digit, which would take an `[Unreleased]:` line
+at the foot of the file into the last section. More than one heading for the
+version, a section with nothing after it, or an empty section is an error.
 
 ## Tests
 
@@ -140,7 +145,7 @@ Plain PowerShell, no framework. Each case builds a small project in a temporary
 directory with a bare repository beside it standing in for `origin`, so pushes
 and tags happen for real without a network. `gh` and every prompt are replaced
 with fakes, and git runs against a throwaway global configuration so nothing
-on the machine running the tests can change the result. 95 cases.
+on the machine running the tests can change the result. 102 cases.
 
 `./check.ps1` runs PSScriptAnalyzer over this directory and then the tests.
 It fetches the analyzer from the PowerShell Gallery, pinned by version and
