@@ -69,6 +69,9 @@ def entity(endpoints, base_url, extra, console, kind, hint=""):
         else:
             config["payload"] = "REPLACE_PAYLOAD"
         headers["Content-Type"] = endpoint.body_type
+    if endpoint.accept:
+        # Ask for the representation the value was chosen from, not the server's default.
+        headers["Accept"] = endpoint.accept
     if headers:
         config["headers"] = headers
     for key, value in extra.items():

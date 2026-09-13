@@ -76,6 +76,8 @@ class Endpoint:
     body_type: str | None = None  # the request body's media type, if it has one
     json_request: bool = False
     body_required: bool = False  # whether the request body itself must be sent
+    # The response media type read, when the response offers others it could send instead.
+    accept: str | None = None
     # Each value in a JSON response body: a label for the menu, and the Jinja
     # expression reaching it. Empty when the response is not JSON.
     values: list[tuple[str, str]] = field(default_factory=list)
@@ -165,6 +167,8 @@ class Spec:
 
         response = self.resolve(self.success_response(operation.get("responses")))
         media_type, media = self.pick_media(response.get("content"))
+        if len(response.get("content") or {}) > 1:
+            endpoint.accept = media_type
         if media_type and is_json(media_type):
             found = []
             self.walk_schema(media.get("schema"), [], found, 0)
