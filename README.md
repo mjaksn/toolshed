@@ -23,6 +23,10 @@ a repository of its own goes in here.
 - [EdfiScripts](EdfiScripts/), simple batch scripts providing basic automation of
   common tasks when doing local Ed-Fi ODS platform development, and very possibly
   outdated now.
+- [ha-rest-yaml](ha-rest-yaml/), a Python script that asks a few numbered
+  questions about an OpenAPI 3 document and writes the Home Assistant YAML for
+  a RESTful sensor, binary sensor or command on one of its endpoints. Standard
+  library only.
 - [install-modules](install-modules/), a PowerShell script that links every
   module in the shed into PowerShell's module path, for PowerShell 7 or
   Windows PowerShell 5.1 or both, so they autoload by name in any session.
@@ -100,19 +104,20 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Seven tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
+Nine tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
 from the gallery and verified against a recorded hash rather than installed, so
 what the check ran against is the same module every time. That is the same
 arrangement the tool already uses for powershell-yaml at run time, and for the
 same reason, and it then runs its own tests. `claude-sessions` runs a copy of
 that analyzer script pointed at its own directory, with its own settings file.
-`RemoveNewline` and `install-modules` fetch the analyzer the same way and then
-run their own tests, written in plain PowerShell. `BasicUpsAdapter` runs its
-own test suite under `node --test`, with nothing to install first. `WinEvents`
-installs its test dependencies, pinned by version and hash, and runs `pytest`.
-`lock-hashes` runs its own tests under `unittest`, with nothing to install.
-Those last three each keep the command in a `check.sh` beside its `ci.json`, so
-the check CI runs is one a person can run too.
+`RemoveNewline`, `install-modules` and `python-release` fetch the analyzer the
+same way and then run their own tests, written in plain PowerShell.
+`BasicUpsAdapter` runs its own test suite under `node --test`, with nothing to
+install first. `WinEvents` installs its test dependencies, pinned by version and
+hash, and runs `pytest`. `lock-hashes` and `ha-rest-yaml` run their own tests
+under `unittest`, with nothing to install. Those last four each keep the command
+in a `check.sh` beside its `ci.json`, so the check CI runs is one a person can
+run too.
 
 ## Licence
 
