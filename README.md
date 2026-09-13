@@ -29,6 +29,10 @@ a repository of its own goes in here.
 - [lock-hashes](lock-hashes/), a Python script that rewrites a pip requirements
   file so every pin carries the hashes `pip install --require-hashes` checks
   against, with a check mode for CI. Standard library only.
+- [python-release](python-release/), a PowerShell script that releases a Python
+  project in two steps: it bumps the version everywhere it is recorded, writes
+  the changelog entry and opens the pull request, then after the merge tags
+  `main` and pushes the tag that triggers the release workflow.
 - [RemoveNewline](RemoveNewline/), a PowerShell module whose one command strips
   every line break from a text file, in every form a line break takes, and
   keeps the encoding and byte order mark it found.
