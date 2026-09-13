@@ -16,6 +16,10 @@ import re
 
 METHODS = ("get", "patch", "post", "put", "delete")
 
+# Names Jinja reads as a literal or an operator rather than a variable, kept in
+# step with the copy in ha_rest_yaml.py.
+JINJA_WORDS = {"true", "false", "none", "True", "False", "None", "and", "or", "not", "in", "is", "if", "else"}
+
 
 def generate(endpoints, base_url, extra, console):
     endpoints = [endpoint for endpoint in endpoints if endpoint.method in METHODS]
@@ -66,4 +70,6 @@ def generate(endpoints, base_url, extra, console):
 def variable(name):
     """A parameter name as a Jinja variable, the way Param.variable spells it."""
     name = re.sub(r"\W", "_", name)
+    if name in JINJA_WORDS:
+        return name + "_"
     return f"_{name}" if name[:1].isdigit() else name

@@ -45,6 +45,9 @@ HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "tra
 # after a dot: the methods of dict itself, and its literal keywords.
 UNSAFE_ATTRIBUTES = set(dir(dict)) | {"true", "false", "none", "True", "False", "None"}
 
+# Names Jinja reads as a literal or an operator rather than a variable.
+JINJA_WORDS = {"true", "false", "none", "True", "False", "None", "and", "or", "not", "in", "is", "if", "else"}
+
 
 @dataclass
 class Param:
@@ -58,6 +61,8 @@ class Param:
     def variable(self) -> str:
         """The name as a Jinja variable, for templates filled from service data."""
         slug = re.sub(r"\W", "_", self.name)
+        if slug in JINJA_WORDS:
+            return slug + "_"
         return f"_{slug}" if slug[:1].isdigit() else slug
 
     @property
