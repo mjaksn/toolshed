@@ -110,13 +110,21 @@ function Read-TextFile {
     [IO.File]::ReadAllText($Path)
 }
 
-# Keeps whatever byte order mark the file had. Line endings are never touched
-# here, because every edit is a replacement inside the text as it was read.
+# Writes back in the encoding the file already had, byte order mark included:
+# the reader detects a UTF-8, UTF-16 or UTF-32 mark and settles on UTF-8 with
+# none when there is no mark. Line endings are never touched here, because
+# every edit is a replacement inside the text as it was read.
 function Write-TextFile {
     param([string]$Path, [string]$Text)
-    $bytes = [IO.File]::ReadAllBytes($Path)
-    $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
-    [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($bom))
+    $reader = [IO.StreamReader]::new($Path, [Text.UTF8Encoding]::new($false), $true)
+    try {
+        $null = $reader.ReadToEnd()
+        $encoding = $reader.CurrentEncoding
+    }
+    finally {
+        $reader.Dispose()
+    }
+    [IO.File]::WriteAllText($Path, $Text, $encoding)
 }
 
 # ---------------------------------------------------------------------------

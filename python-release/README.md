@@ -102,8 +102,9 @@ The README line is the example netflume and lanname show of reading
 which its CI compares byte for byte with a fresh one; only that one line is
 replaced, and the file is never parsed and rewritten.
 
-Edits are replacements inside the text as it was read, so line endings and any
-byte order mark stay as they were.
+Edits are replacements inside the text as it was read, and each file is written
+back in the encoding it was read in, so line endings, the encoding and any byte
+order mark stay as they were.
 
 ## The changelog
 

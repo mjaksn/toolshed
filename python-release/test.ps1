@@ -469,6 +469,24 @@ try {
         Assert-Equal 'the body is sent with LF' "- The widget.`n" $script:PrBody
     }
 
+    Invoke-Scenario 'bump keeps the encoding' {
+        $repo = Build-Fixture
+        $readme = Join-Path $repo 'README.md'
+        $openapi = Join-Path $repo 'docs/openapi.json'
+        [IO.File]::WriteAllText($readme, [IO.File]::ReadAllText($readme), [Text.UnicodeEncoding]::new($false, $true))
+        [IO.File]::WriteAllText($openapi, [IO.File]::ReadAllText($openapi), [Text.UTF8Encoding]::new($true))
+        Invoke-TestGit $repo commit --quiet --all --message 'Encodings' | Out-Null
+        Invoke-TestGit $repo push --quiet origin main | Out-Null
+        Invoke-Release $repo @('1', '0.6.0', 'y', 'y')
+        $bytes = [IO.File]::ReadAllBytes($readme)
+        Assert-True 'a UTF-16 file keeps its byte order mark' ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE)
+        Assert-True 'and stays UTF-16' ([Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2).Contains('# "0.6.0"'))
+        $bytes = [IO.File]::ReadAllBytes($openapi)
+        Assert-True 'a UTF-8 file keeps its byte order mark' ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF -and $bytes[3] -eq [byte][char]'{')
+        $bytes = [IO.File]::ReadAllBytes((Join-Path $repo 'pyproject.toml'))
+        Assert-Equal 'and a file with no mark gains none' ([byte][char]'[') $bytes[0]
+    }
+
     Invoke-Scenario 'bump declined before the push' {
         $repo = Build-Fixture
         Invoke-Release $repo @('1', '0.6.0', 'n')
