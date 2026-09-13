@@ -27,9 +27,10 @@ def generate(endpoints, base_url, extra, console):
     optional = [p for p in endpoint.params if not p.required]
     picked = []
     if optional:
-        labels = [f"{p.name} ({p.location})" for p in optional]
+        labels = [f"{p.name} ({p.location}{', included with any body field' if p.needed_with_body else ''})" for p in optional]
         picked = [optional[i] for i in console.choose_many("Which optional parameters should it include?", labels)]
-    params = [p for p in endpoint.params if p.required or p in picked]
+    body_sent = any(p.location == "body" and (p.required or p in picked) for p in endpoint.params)
+    params = [p for p in endpoint.params if p.required or p in picked or (body_sent and p.needed_with_body)]
 
     path_variables = {p.name: p.variable for p in endpoint.params if p.location == "path"}
     # Values reaching the url are encoded, so an & or # in one cannot add a query

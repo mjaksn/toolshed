@@ -63,7 +63,8 @@ variable, filled from the data the action is called with, so a path parameter
 parameters go into the URL too, because `rest_command` has no `params` key.
 Values in the URL pass through `urlencode`, so an `&` or `#` in one stays part
 of the value, though a `/` is left as it is. The properties of a JSON request
-body count as parameters as well, and go into a JSON `payload`. Two parameters
+body count as parameters as well, and go into a JSON `payload`; once any of
+them is chosen, the ones the body's schema requires come along too. Two parameters
 whose names would make the same variable, such as a query and a header both
 called `id`, get the location added to tell them apart. The tool prints the
 name of each variable the action will want.

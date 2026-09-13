@@ -58,6 +58,8 @@ class Param:
     required: bool
     # The Jinja variable filled from service data, unique within its endpoint.
     variable: str = ""
+    # For a body property: the schema requires it whenever the body is sent.
+    needed_with_body: bool = False
 
     @property
     def placeholder(self) -> str:
@@ -144,11 +146,13 @@ class Spec:
             endpoint.body_required = bool(body.get("required"))
             schema = self.merged(media.get("schema"))
             if endpoint.json_request and schema.get("properties"):
-                # A property the schema requires is only required when the body
-                # it belongs to has to be sent at all.
-                required = set(schema.get("required") or []) if endpoint.body_required else set()
+                # A property the schema requires is only required outright when
+                # the body it belongs to has to be sent at all. Otherwise it is
+                # needed as soon as any part of the body is.
+                needed = set(schema.get("required") or [])
                 endpoint.params += [
-                    Param(name, "body", name in required) for name in schema["properties"]
+                    Param(name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed)
+                    for name in schema["properties"]
                 ]
             else:
                 endpoint.params.append(Param("payload", "raw body", endpoint.body_required))
