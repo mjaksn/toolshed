@@ -139,9 +139,9 @@ binary_sensor:
         )
 
     def test_command_with_chosen_optional_parameters(self):
-        # Digest auth, the PUT endpoint, with the query and body optionals.
+        # Digest auth, the PUT endpoint, with the query, header and body optionals.
         self.assertEqual(
-            self.run_tool("3", "2", "3", "1, 3"),
+            self.run_tool("3", "2", "3", "1, 2, 3"),
             """\
 rest_command:
   set_target:
@@ -150,6 +150,8 @@ rest_command:
     authentication: digest
     username: YOUR_USERNAME
     password: YOUR_PASSWORD
+    headers:
+      X-Trace: '{{ X_Trace }}'
     payload: '{"celsius": {{ celsius | tojson }}, "mode": {{ mode | tojson }}}'
     content_type: application/json
 """,
