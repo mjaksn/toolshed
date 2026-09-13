@@ -62,7 +62,9 @@ def entity(endpoints, base_url, extra, console, kind, hint=""):
         config["params"] = params
     if endpoint.method == "post" and endpoint.body_type:
         body = [p for p in required if p.location == "body"]
-        if endpoint.json_request:
+        # An object of known properties; anything else, an array or a free-form
+        # body, is left as a token rather than guessed at.
+        if any(p.location == "body" for p in endpoint.params):
             config["payload"] = json.dumps({p.name: p.placeholder for p in body})
         else:
             config["payload"] = "REPLACE_PAYLOAD"
