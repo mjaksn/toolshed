@@ -160,6 +160,8 @@ rest_command:
         self.assertEqual(ha_rest_yaml.Spec({}, source).base_url(), "http://device.local:8000")
         relative = {"servers": [{"url": "/api/v1/"}]}
         self.assertEqual(ha_rest_yaml.Spec(relative, source).base_url(), "http://device.local:8000/api/v1")
+        nested = "http://device.local:8000/spec/openapi.json"
+        self.assertEqual(ha_rest_yaml.Spec({"servers": [{"url": "v1"}]}, nested).base_url(), "http://device.local:8000/spec/v1")
         self.assertEqual(ha_rest_yaml.Spec({}).base_url(), "http://HOST")
 
 

@@ -112,7 +112,8 @@ class Spec:
         for name, variable in (servers[0].get("variables") or {}).items():
             url = url.replace("{" + name + "}", str(variable.get("default", "")))
         if "://" not in url:
-            url = urljoin(self.source or "http://HOST", "/" + url.lstrip("/"))
+            # Relative to where the document was served, as OpenAPI resolves it.
+            url = urljoin(self.source or "http://HOST/", url or "/")
         return url.rstrip("/")
 
     def endpoints(self) -> list[Endpoint]:
