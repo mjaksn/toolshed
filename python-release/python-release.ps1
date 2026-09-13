@@ -23,11 +23,11 @@
     changelog section.
 
     Tag and push to trigger the release. The checkout must have no staged or
-    unstaged changes to tracked files, the version must agree everywhere,
-    CHANGELOG.md must have a section for it, no tag vX.Y.Z may exist locally or
-    on origin, the checkout must be on main, and main must be at the same
-    commit as origin's. It then asks before creating the annotated tag and
-    pushing it to origin.
+    unstaged changes to tracked files, the version must agree everywhere and be
+    of the X.Y.Z form, CHANGELOG.md must have a section for it, no tag vX.Y.Z
+    may exist locally or on origin, the checkout must be on main, and main must
+    be at the same commit as origin's. It then asks before creating the
+    annotated tag and pushing it to origin.
 
     Any check that fails prints what was wrong and exits 1 before anything is
     changed. A push or a pull request that fails after the commit also exits
@@ -38,9 +38,9 @@
 
       pyproject.toml          version = "X.Y.Z"                   required
       <package>/__init__.py   __version__ = "X.Y.Z"               required
-                              (or src/<package>/__init__.py)
+                              (or src/<package>/__init__.py, never both)
       README.md               <package>.__version__  # "X.Y.Z"    if present
-      docs/openapi.json       "version": "X.Y.Z"                  if present
+      docs/openapi.json       "version": "X.Y.Z"                  if the file exists
 
     The package directory is the project name from pyproject.toml, lower cased,
     with hyphens and dots turned into underscores.
@@ -294,6 +294,7 @@ function Find-VersionLocation {
         [string]$Pattern,
         [string]$Description,
         [switch]$Required,
+        [switch]$RequireLine,
         [switch]$Single
     )
     $path = Join-Path $Repository $File
@@ -303,7 +304,7 @@ function Find-VersionLocation {
     }
     $found = [regex]::Matches((Read-TextFile $path), $Pattern)
     if ($found.Count -eq 0) {
-        if ($Required) { throw "$File has no $Description line." }
+        if ($Required -or $RequireLine) { throw "$File has no $Description line." }
         return
     }
     if ($Single -and $found.Count -gt 1) {
@@ -326,12 +327,15 @@ function Get-VersionLocation {
     }
     $package = $name.Groups[1].Value.ToLowerInvariant() -replace '[-.]', '_'
 
-    $init = @("$package/__init__.py", "src/$package/__init__.py") |
-        Where-Object { Test-Path -LiteralPath (Join-Path $Repository $_) -PathType Leaf } |
-        Select-Object -First 1
-    if (-not $init) {
+    $inits = @(@("$package/__init__.py", "src/$package/__init__.py") |
+            Where-Object { Test-Path -LiteralPath (Join-Path $Repository $_) -PathType Leaf })
+    if ($inits.Count -eq 0) {
         throw "Neither $package/__init__.py nor src/$package/__init__.py exists, and the version is expected in one of them as __version__."
     }
+    if ($inits.Count -gt 1) {
+        throw "Both $package/__init__.py and src/$package/__init__.py exist, so which one is the package is ambiguous."
+    }
+    $init = $inits[0]
 
     Find-VersionLocation -Repository $Repository -File 'pyproject.toml' -Required -Single `
         -Pattern '(?m)^(version\s*=\s*")([^"]*)(")' -Description 'version = "..."'
@@ -340,7 +344,10 @@ function Get-VersionLocation {
     Find-VersionLocation -Repository $Repository -File 'README.md' `
         -Pattern ('(?m)^(\s*' + [regex]::Escape($package) + '\.__version__\s*#\s*")([^"]*)(")') `
         -Description "$package.__version__"
-    Find-VersionLocation -Repository $Repository -File 'docs/openapi.json' -Single `
+    # An OpenAPI description always carries info.version, so a file with no line
+    # this pattern finds holds it in a shape this cannot edit, and skipping it
+    # would leave it behind.
+    Find-VersionLocation -Repository $Repository -File 'docs/openapi.json' -RequireLine -Single `
         -Pattern '(?m)^(\s*"version":\s*")([^"]*)(")' -Description '"version": "..."'
 }
 
@@ -372,9 +379,11 @@ function Get-ChangelogHeadingCount {
     [regex]::Matches($Text, '(?m)^## \[' + [regex]::Escape($Version) + '\]').Count
 }
 
-# The same pattern the release workflows use to lift the release notes out, so
-# a section this accepts is one the release will accept. The heading is left
-# out, as it is there.
+# Nearly the pattern the release workflows use to lift the release notes out,
+# and the heading is left out, as it is there. The difference is the end: the
+# workflows stop at a link reference that starts with a digit, and this stops
+# at any link reference, so an [Unreleased]: line at the foot of the file is
+# never taken for part of the last section.
 function Get-ChangelogSection {
     param([string]$Text, [string]$Version)
     $count = Get-ChangelogHeadingCount -Text $Text -Version $Version
@@ -384,7 +393,7 @@ function Get-ChangelogSection {
     if ($count -gt 1) {
         throw "CHANGELOG.md has $count '## [$Version]' headings, so which section belongs to the release is ambiguous."
     }
-    $found = [regex]::Match($Text, '(?ms)^## \[' + [regex]::Escape($Version) + '\][^\n]*\n(.*?)(?=^## \[|^\[[0-9])')
+    $found = [regex]::Match($Text, '(?ms)^## \[' + [regex]::Escape($Version) + '\][^\n]*\n(.*?)(?=^## \[|^\[[^\]\r\n]+\]:)')
     if (-not $found.Success) {
         throw "The '## [$Version]' section of CHANGELOG.md has nothing after it, neither another '## [' heading nor a link reference, so where it ends is ambiguous."
     }
@@ -552,6 +561,9 @@ function Invoke-ReleaseTag {
     $locations = @(Get-VersionLocation -Repository $Repository)
     $version = Get-ConsistentVersion -Location $locations
     Write-Host "The current version is $version, recorded in $(($locations | ForEach-Object File) -join ', ')."
+    if ($version -notmatch '^\d+\.\d+\.\d+$') {
+        throw "The version '$version' is not of the MAJOR.MINOR.PATCH form, so v$version would not be the vX.Y.Z tag the release workflows expect."
+    }
 
     $changelogPath = Join-Path $Repository 'CHANGELOG.md'
     if (-not (Test-Path -LiteralPath $changelogPath -PathType Leaf)) {
