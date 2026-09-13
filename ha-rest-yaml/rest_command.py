@@ -58,8 +58,8 @@ def generate(endpoints, base_url, extra, console):
     if body:
         fields = ", ".join(f"{json.dumps(p.name)}: {{{{ {p.variable} | tojson }}}}" for p in body)
         config["payload"] = "{" + fields + "}"
-    elif any(p.location == "raw body" for p in params):
-        config["payload"] = "{{ payload }}"
+    elif raw := [p for p in params if p.location == "raw body"]:
+        config["payload"] = f"{{{{ {raw[0].variable} }}}}"
     elif endpoint.body_required and endpoint.json_request:
         # A body that must be sent, with none of its properties chosen.
         config["payload"] = "{}"
