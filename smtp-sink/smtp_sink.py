@@ -143,7 +143,12 @@ def forward_syslog(peer, mail_from, rcpts, body, include_body, max_len):
         text = " | ".join(piece.strip() for piece in message_text(msg).splitlines() if piece.strip())
         line += f' body="{text}"'
     if len(line) > max_len:
-        line = line[: max_len - 3] + "..."
+        # A bound under four characters leaves no room for the ellipsis, and a
+        # negative one is not a length at all. Either way the line is simply
+        # cut to fit, because a truncation that runs past the limit it was
+        # given is worse than a line with nothing left in it.
+        keep = max(max_len, 0)
+        line = line[: keep - 3] + "..." if keep > 3 else line[:keep]
     try:
         syslog.info(line)
     except Exception as exc:

@@ -25,7 +25,7 @@ python smtp_sink.py --bind 192.168.1.50 --syslog 192.168.1.10 --syslog-body
 | `--syslog-proto udp\|tcp` | Transport for the above, `udp` by default. |
 | `--syslog-facility NAME` | Syslog facility, `local0` by default. |
 | `--syslog-body` | Put the message body in the syslog line as well as the summary. Base64 and quoted-printable are decoded, and a multipart message contributes its first text/plain part rather than its boundaries and attachments. |
-| `--syslog-max N` | Truncate syslog lines to N characters, 2000 by default. |
+| `--syslog-max N` | Truncate syslog lines to N characters, 2000 by default. A line over the limit ends in an ellipsis, unless N leaves no room for one, in which case it is simply cut to N. |
 
 The syslog line carries the subject as text: a device that puts a degree sign
 or an accent in one sends it as an RFC 2047 encoded word, and that is decoded

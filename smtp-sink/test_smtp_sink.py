@@ -240,6 +240,13 @@ class ForwardSyslogTests(unittest.TestCase):
         self.assertEqual(len(line), 80)
         self.assertTrue(line.endswith("..."))
 
+    def test_a_limit_with_no_room_for_the_ellipsis_still_holds(self):
+        for max_len in (0, 1, 2, 3, 4, -5):
+            with self.subTest(max_len=max_len):
+                self.logger.reset_mock()
+                line = self.forward("Subject: " + "x" * 500 + "\n\nbody\n", max_len=max_len)
+                self.assertLessEqual(len(line), max(max_len, 0))
+
     def test_a_body_of_eight_bit_text_is_not_mangled(self):
         # No transfer encoding, so the payload is the wire bytes themselves.
         # Round-tripping those through a str payload turned the accent into a
