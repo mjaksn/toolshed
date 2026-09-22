@@ -231,7 +231,14 @@ async def handle_client(reader, writer, args):
                     # undone and nothing else touched.
                     body = b"".join(chunk + b"\r\n" for chunk in chunks)
                     write_entry(args.log, peer, mail_from, rcpts, body)
-                    forward_syslog(peer, mail_from, rcpts, body, args.syslog_body, args.syslog_max)
+                    # Off the loop: `syslog.info` is synchronous, and a TCP
+                    # handler whose server has gone away reconnects inside
+                    # `emit`, which blocks. On the loop that stalls every other
+                    # connection the sink is holding.
+                    await asyncio.to_thread(
+                        forward_syslog, peer, mail_from, rcpts, body,
+                        args.syslog_body, args.syslog_max,
+                    )
                     print(f"[{peer[0]}] logged message from {mail_from} to {rcpts}")
                     await send("250 OK: queued")
                 mail_from, rcpts = None, []
