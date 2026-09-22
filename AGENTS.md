@@ -50,11 +50,14 @@ tool is set up by following its own README.
 | Format | none configured |
 | Run | per tool, see its README |
 
-`ruff check .` was run in this checkout and passes. It covers five places
+`ruff check .` was run in this checkout and passes. It covers six places
 now: `apitrace/apitrace.py`, which carries its own `apitrace/ruff.toml`
 switching off three stylistic rules for that one file with a reason beside
 each; the two files in `WinEvents`, which carry a `WinEvents/ruff.toml` of the
-same kind; the two files in `lock-hashes` and the five in `ha-rest-yaml`, which
+same kind; the two files in `smtp-sink`, which carry a `smtp-sink/ruff.toml`
+turning off `BLE001` and `S110` for the handlers that keep one bad client from
+taking the server down, again with a reason beside each; the two files in
+`lock-hashes` and the five in `ha-rest-yaml`, which
 pass on the defaults and carry no `ruff.toml`; and `.github/changed_tools.py`,
 the CI plumbing. It runs
 repository-wide and unconditionally, so any Python that lands is linted on
@@ -63,7 +66,7 @@ arrival whatever else a change touched. CI installs ruff from
 version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-Nine tools have a check. `cd dispatch-desk && ./check.ps1` runs
+Ten tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and then `test.ps1`, and takes about a
 minute the first time, because it fetches the analyzer and the YAML parser,
 and seconds afterwards from the cache. It passes with nothing reported and 88
@@ -82,9 +85,12 @@ and the prompts. `cd BasicUpsAdapter && bash ./check.sh` runs the
 Node test suite with nothing to install, and `cd WinEvents && bash ./check.sh`
 installs the pinned test dependencies and runs pytest; the second is Windows
 only, because pywin32 is. `cd lock-hashes && bash ./check.sh` runs its
-unittest suite with nothing to install, and `cd ha-rest-yaml && bash
-./check.sh` does the same for that tool's 4 tests. Every one of these was run
-in this checkout and passes.
+unittest suite with nothing to install, `cd ha-rest-yaml && bash
+./check.sh` does the same for that tool's 4 tests, and `cd smtp-sink && bash
+./check.sh` does it for that tool's 32, which take a second or so and need no
+network: the server tests bind the loopback address on a port the operating
+system picks, and the syslog logger is replaced with a mock. Every one of these
+was run in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
 If one is added without running it, mark it `UNVERIFIED` rather than implying
