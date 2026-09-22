@@ -33,8 +33,14 @@ on the way out. A subject that cannot be decoded is forwarded as it arrived
 rather than costing the whole line.
 
 Without `--syslog` nothing is forwarded and the log file is the only record.
-The log file always gets the message exactly as it arrived, whole, whatever
-the syslog line was trimmed down to.
+
+That file gets every message byte for byte as it arrived, whole, whatever the
+syslog line was trimmed down to. Nothing in it is decoded and written back
+out, so a device sending 8-bit text in some encoding of its own keeps its
+bytes intact rather than having them replaced. One consequence worth knowing
+before you point a tool at the file: the envelope lines the sink adds end in
+LF and the messages between them keep the CRLF they arrived with, so the
+endings are mixed by design.
 
 ## A warning about where you point it
 

@@ -21,7 +21,7 @@ import socket
 import sys
 from email.errors import HeaderParseError
 from email.header import decode_header, make_header
-from email.parser import Parser
+from email.parser import BytesParser
 
 HOSTNAME = socket.gethostname()
 MAX_MESSAGE_BYTES = 10 * 1024 * 1024
@@ -31,18 +31,32 @@ syslog = None  # logging.Logger, set up in main() if --syslog is given
 
 
 def write_entry(log_path, peer, mail_from, rcpts, body):
+    """Append one message to the log file, byte for byte as it arrived.
+
+    `body` is bytes and is written without being decoded, because a device is
+    free to send 8-bit text in whatever encoding it likes and this file is the
+    only permanent record of what it said. Decoding it here to write it back
+    out would turn anything that is not UTF-8 into replacement characters and
+    lose the original for good.
+
+    The envelope lines the sink adds around it end in LF while the message
+    keeps its own CRLF, so the file has mixed line endings by design.
+    """
     ts = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
-    with open(log_path, "a", encoding="utf-8", errors="replace") as f:
-        f.write("=" * 78 + "\n")
-        f.write(f"Received: {ts}\n")
-        f.write(f"Peer:     {peer[0]}:{peer[1]}\n")
-        f.write(f"From:     {mail_from}\n")
-        f.write(f"To:       {', '.join(rcpts)}\n")
-        f.write("-" * 78 + "\n")
+    header = (
+        "=" * 78 + "\n"
+        f"Received: {ts}\n"
+        f"Peer:     {peer[0]}:{peer[1]}\n"
+        f"From:     {mail_from}\n"
+        f"To:       {', '.join(rcpts)}\n"
+        + "-" * 78 + "\n"
+    )
+    with open(log_path, "ab") as f:
+        f.write(header.encode("utf-8"))
         f.write(body)
-        if not body.endswith("\n"):
-            f.write("\n")
-        f.write("\n")
+        if not body.endswith(b"\n"):
+            f.write(b"\n")
+        f.write(b"\n")
         f.flush()
 
 
@@ -94,9 +108,14 @@ def message_text(msg):
 def forward_syslog(peer, mail_from, rcpts, body, include_body, max_len):
     if syslog is None:
         return
-    msg = Parser().parsestr(body)
+    msg = BytesParser().parsebytes(body)
     raw_subject = msg.get("Subject")
     subject = "(no subject)" if raw_subject is None else header_text(str(raw_subject))
+    # A raw 8-bit subject, one sent without encoded words, comes back out of
+    # the parser as surrogates. Those cannot be encoded again, and the syslog
+    # handler would raise on the way out and lose the whole line, so they are
+    # flattened to replacement characters here where only the subject suffers.
+    subject = subject.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
     subject = " ".join(subject.split())
     line = (
         f'peer={peer[0]} from={mail_from} to={",".join(rcpts)} '
@@ -120,11 +139,21 @@ async def handle_client(reader, writer, args):
         writer.write((line + "\r\n").encode("ascii", "replace"))
         await writer.drain()
 
-    async def readline():
+    async def readline_raw():
         raw = await asyncio.wait_for(reader.readline(), IDLE_TIMEOUT)
         if not raw:
             raise ConnectionResetError
-        return raw.decode("utf-8", "replace").rstrip("\r\n")
+        # One terminator, not every trailing CR and LF. `rstrip` would eat a
+        # carriage return that belongs to the message.
+        if raw.endswith(b"\r\n"):
+            return raw[:-2]
+        if raw.endswith(b"\n"):
+            return raw[:-1]
+        return raw
+
+    async def readline():
+        """A command line, as text. DATA reads bytes instead."""
+        return (await readline_raw()).decode("utf-8", "replace")
 
     mail_from = None
     rcpts = []
@@ -158,19 +187,16 @@ async def handle_client(reader, writer, args):
                 chunks = []
                 size = 0
                 while True:
-                    dline = await readline()
-                    if dline == ".":
+                    dline = await readline_raw()
+                    if dline == b".":
                         break
-                    if dline.startswith(".."):
+                    if dline.startswith(b".."):
                         dline = dline[1:]  # undo dot-stuffing
-                    # Octets, not characters. The limit is advertised to the
-                    # client as SIZE, which SMTP defines in octets, so counting
-                    # decoded characters let a message of non-ASCII text run to
-                    # several times the number that was promised. The line is
-                    # measured after decoding rather than before, so a byte
-                    # that had to be replaced counts as its replacement, which
-                    # is near enough at this threshold.
-                    size += len(dline.encode("utf-8", "replace")) + 1
+                    # The message in octets, its CRLF included, which is what
+                    # SIZE promises the client and what the client's own
+                    # `size=` parameter counts. Measuring decoded characters
+                    # let a message of 8-bit text run well past the limit.
+                    size += len(dline) + 2
                     if size > MAX_MESSAGE_BYTES:
                         chunks = None
                     if chunks is not None:
@@ -178,7 +204,9 @@ async def handle_client(reader, writer, args):
                 if chunks is None:
                     await send("552 Message too large")
                 else:
-                    body = "\n".join(chunks)
+                    # Rebuilt exactly as it came off the wire, dot-stuffing
+                    # undone and nothing else touched.
+                    body = b"".join(chunk + b"\r\n" for chunk in chunks)
                     write_entry(args.log, peer, mail_from, rcpts, body)
                     forward_syslog(peer, mail_from, rcpts, body, args.syslog_body, args.syslog_max)
                     print(f"[{peer[0]}] logged message from {mail_from} to {rcpts}")

@@ -79,9 +79,15 @@ class WriteEntryTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir)
         self.log = self.dir / "sink.log"
 
-    def write(self, body, mail_from="<a@example.test>", rcpts=("<b@example.test>",)):
+    def write_bytes(self, body, mail_from="<a@example.test>", rcpts=("<b@example.test>",)):
+        """Log one message and hand back the file as bytes, byte for byte."""
         smtp_sink.write_entry(str(self.log), ("192.0.2.7", 41234), mail_from, list(rcpts), body)
-        return self.log.read_text(encoding="utf-8")
+        return self.log.read_bytes()
+
+    def write(self, body, mail_from="<a@example.test>", rcpts=("<b@example.test>",)):
+        """The same, taking and returning text, which most cases read better in."""
+        raw = self.write_bytes(body.encode("utf-8"), mail_from, rcpts)
+        return raw.decode("utf-8", "replace")
 
     def test_records_the_envelope_and_the_body(self):
         text = self.write("Subject: hello\n\nthe body\n")
@@ -106,6 +112,24 @@ class WriteEntryTests(unittest.TestCase):
         self.assertIn(ATTACHMENT_BASE64, text)
         self.assertIn("--B--", text)
 
+    def test_keeps_bytes_that_are_not_utf_8(self):
+        """The log is the only record, so nothing in it is decoded and rewritten."""
+        body = (
+            b"Subject: s\r\n"
+            b"Content-Type: text/plain; charset=iso-8859-1\r\n"
+            b"\r\n"
+            b"caf\xe9 too warm\r\n"
+        )
+        raw = self.write_bytes(body)
+        self.assertIn(b"caf\xe9 too warm", raw)
+        # U+FFFD is what a decode and re-encode of that byte would
+        # have left behind, so its absence is the whole assertion.
+        self.assertNotIn(chr(0xFFFD).encode(), raw)
+
+    def test_keeps_the_line_endings_the_message_arrived_with(self):
+        raw = self.write_bytes(b"Subject: s\r\n\r\ntwo\r\nlines\r\n")
+        self.assertIn(b"two\r\nlines\r\n", raw)
+
     def test_appends_rather_than_replacing(self):
         self.write("first\n")
         text = self.write("second\n")
@@ -122,6 +146,8 @@ class ForwardSyslogTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def forward(self, body, include_body=False, max_len=2000):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
         smtp_sink.forward_syslog(
             ("192.0.2.7", 41234), "<a@example.test>", ["<b@example.test>"],
             body, include_body, max_len,
@@ -214,6 +240,38 @@ class ForwardSyslogTests(unittest.TestCase):
         self.assertEqual(len(line), 80)
         self.assertTrue(line.endswith("..."))
 
+    def test_a_body_of_eight_bit_text_is_not_mangled(self):
+        # No transfer encoding, so the payload is the wire bytes themselves.
+        # Round-tripping those through a str payload turned the accent into a
+        # replacement character.
+        body = (
+            "Subject: s\n"
+            "Content-Type: text/plain; charset=utf-8\n"
+            "\n"
+            "café too warm\n"
+        ).encode()
+        self.assertIn('body="café too warm"', self.forward(body, include_body=True))
+
+    def test_a_latin_1_body_is_decoded_with_its_own_charset(self):
+        body = (
+            b"Subject: s\r\n"
+            b"Content-Type: text/plain; charset=iso-8859-1\r\n"
+            b"\r\n"
+            b"caf\xe9 too warm\r\n"
+        )
+        self.assertIn('body="café too warm"', self.forward(body, include_body=True))
+
+    def test_a_raw_eight_bit_subject_does_not_lose_the_line(self):
+        """The forward has to survive a subject that cannot be encoded again."""
+        # A syslog handler encodes the line on its way out. This mock does the
+        # same, so a subject carrying surrogates fails here exactly as it would
+        # there, rather than passing a test and failing in the field.
+        self.logger.info.side_effect = lambda line: line.encode("utf-8")
+        body = b"Subject: caf\xe9 alert\r\n\r\nbody\r\n"
+        line = self.forward(body)
+        self.assertIn("peer=192.0.2.7", line)
+        line.encode("utf-8")  # would raise on a surrogate
+
     def test_does_nothing_when_no_syslog_is_configured(self):
         with mock.patch.object(smtp_sink, "syslog", None):
             smtp_sink.forward_syslog(("192.0.2.7", 1), "a", ["b"], "Subject: s\n\nx\n", False, 2000)
@@ -278,7 +336,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(accepted[0].startswith("250"), accepted)
         self.assertTrue((await self.command(reader, writer, "QUIT"))[0].startswith("221"))
 
-        text = self.log.read_text(encoding="utf-8")
+        text = self.log.read_bytes().decode("utf-8")
         self.assertIn("From:     <a@example.test>", text)
         self.assertIn("To:       <b@example.test>", text)
         self.assertIn("Subject: hello", text)
@@ -293,6 +351,35 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         writer.write(body.encode("utf-8") + b"\r\n.\r\n")
         await writer.drain()
         return await read_reply(reader)
+
+    async def test_the_message_reaches_the_log_exactly_as_it_was_sent(self):
+        """CRLF kept, dot-stuffing undone, and a non-UTF-8 byte left alone."""
+        reader, writer = await self.connect()
+        await self.command(reader, writer, "EHLO client.example.test")
+        await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+        await self.command(reader, writer, "RCPT TO:<b@example.test>")
+        await self.command(reader, writer, "DATA")
+        writer.write(
+            b"Subject: s\r\n"
+            b"Content-Type: text/plain; charset=iso-8859-1\r\n"
+            b"\r\n"
+            b"caf\xe9 too warm\r\n"
+            b"..stuffed\r\n"
+            b".\r\n"
+        )
+        await writer.drain()
+        reply = await read_reply(reader)
+        self.assertTrue(reply[0].startswith("250"), reply)
+
+        raw = self.log.read_bytes()
+        self.assertIn(
+            b"Subject: s\r\n"
+            b"Content-Type: text/plain; charset=iso-8859-1\r\n"
+            b"\r\n"
+            b"caf\xe9 too warm\r\n"
+            b".stuffed\r\n",
+            raw,
+        )
 
     async def test_the_advertised_size_is_the_limit_that_is_enforced(self):
         reader, writer = await self.connect()
@@ -327,7 +414,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         # refusal cleared the envelope rather than leaving it behind.
         reply = await self.send_message(reader, writer, "Subject: small\r\n\r\nfits")
         self.assertTrue(reply[0].startswith("250"), reply)
-        self.assertIn("fits", self.log.read_text(encoding="utf-8"))
+        self.assertIn("fits", self.log.read_bytes().decode("utf-8"))
 
     async def test_helo_is_answered_as_well_as_ehlo(self):
         reader, writer = await self.connect()
@@ -379,8 +466,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.to_thread(send)
 
-        text = self.log.read_text(encoding="utf-8")
-        self.assertIn("\n.hidden line\n", text)
+        text = self.log.read_bytes().decode("utf-8")
+        self.assertIn(".hidden line", text)
         self.assertIn("plain line", text)
         self.assertIn("a@example.test", text)
 
