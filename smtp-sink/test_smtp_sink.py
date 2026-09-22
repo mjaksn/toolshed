@@ -352,6 +352,33 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         await writer.drain()
         return await read_reply(reader)
 
+    async def test_esmtp_parameters_stay_out_of_the_envelope(self):
+        reader, writer = await self.connect()
+        await self.command(reader, writer, "EHLO client.example.test")
+        await self.command(reader, writer, "MAIL FROM:<a@example.test> SIZE=99 BODY=8BITMIME")
+        await self.command(reader, writer, "RCPT TO:<b@example.test> NOTIFY=FAILURE")
+        await self.command(reader, writer, "DATA")
+        writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+        await writer.drain()
+        await read_reply(reader)
+
+        text = self.log.read_bytes().decode("utf-8")
+        self.assertIn("From:     <a@example.test>\n", text)
+        self.assertIn("To:       <b@example.test>\n", text)
+        self.assertNotIn("SIZE=99", text)
+        self.assertNotIn("NOTIFY", text)
+
+    async def test_the_null_sender_is_kept(self):
+        reader, writer = await self.connect()
+        await self.command(reader, writer, "EHLO client.example.test")
+        await self.command(reader, writer, "MAIL FROM:<>")
+        await self.command(reader, writer, "RCPT TO:<b@example.test>")
+        await self.command(reader, writer, "DATA")
+        writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+        await writer.drain()
+        await read_reply(reader)
+        self.assertIn("From:     <>\n", self.log.read_bytes().decode("utf-8"))
+
     async def test_the_message_reaches_the_log_exactly_as_it_was_sent(self):
         """CRLF kept, dot-stuffing undone, and a non-UTF-8 byte left alone."""
         reader, writer = await self.connect()
@@ -469,7 +496,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         text = self.log.read_bytes().decode("utf-8")
         self.assertIn(".hidden line", text)
         self.assertIn("plain line", text)
-        self.assertIn("a@example.test", text)
+        # The exact line, not a substring. smtplib appends `size=` to MAIL
+        # FROM the moment the server advertises SIZE, and a loose assertion
+        # here let that parameter into the envelope unnoticed.
+        self.assertIn("From:     <a@example.test>\n", text)
+        self.assertIn("To:       <b@example.test>\n", text)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,10 @@ before you point a tool at the file: the envelope lines the sink adds end in
 LF and the messages between them keep the CRLF they arrived with, so the
 endings are mixed by design.
 
+The envelope records the address on its own. A client sends `MAIL
+FROM:<a@b.test> SIZE=1234` once the server advertises `SIZE`, which it does,
+and the parameters after the address are not part of it.
+
 ## A warning about where you point it
 
 There is no authentication and no rate limiting, and anything that connects

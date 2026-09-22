@@ -60,6 +60,24 @@ def write_entry(log_path, peer, mail_from, rcpts, body):
         f.flush()
 
 
+def envelope_path(arg):
+    """The address out of a MAIL or RCPT argument, ESMTP parameters dropped.
+
+    `MAIL FROM:<a@b.test> SIZE=1234 BODY=8BITMIME` is what a client sends the
+    moment the server advertises SIZE, which this one does, so the parameters
+    have to come off or they end up recorded as part of the address. Python's
+    own smtplib appends `size=` to every message. The null sender, `<>`, is
+    kept as it is, because it says something.
+    """
+    rest = arg.partition(":")[2].strip() or arg
+    start = rest.find("<")
+    end = rest.find(">", start + 1)
+    if start != -1 and end != -1:
+        return rest[start : end + 1]
+    # No angle brackets. Anything after the first space is a parameter.
+    return rest.split(" ")[0]
+
+
 def header_text(value):
     """A header as text, with any RFC 2047 encoded words decoded.
 
@@ -173,11 +191,11 @@ async def handle_client(reader, writer, args):
                 await send(f"250-SIZE {MAX_MESSAGE_BYTES}")
                 await send("250 8BITMIME")
             elif verb == "MAIL":
-                mail_from = arg.partition(":")[2].strip() or arg
+                mail_from = envelope_path(arg)
                 rcpts = []
                 await send("250 OK")
             elif verb == "RCPT":
-                rcpts.append(arg.partition(":")[2].strip() or arg)
+                rcpts.append(envelope_path(arg))
                 await send("250 OK")
             elif verb == "DATA":
                 if mail_from is None or not rcpts:
