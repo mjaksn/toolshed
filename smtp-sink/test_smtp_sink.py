@@ -152,6 +152,20 @@ class EnvelopePathTests(unittest.TestCase):
             with self.subTest(arg=arg):
                 self.assertEqual(smtp_sink.envelope_path(arg), expected)
 
+    def test_a_quoted_local_part_can_hold_a_bracket(self):
+        cases = {
+            'FROM:<"a>b"@example.test> SIZE=1': '<"a>b"@example.test>',
+            # A backslash inside the quotes takes the next character literally,
+            # so the quote after it does not close the string.
+            'FROM:<"a\\">b"@x.test> SIZE=1': '<"a\\">b"@x.test>',
+            # An unbalanced quote is malformed. The first `>` is the fallback,
+            # which is where the path was always cut before.
+            'FROM:<"a>b@x.test> SIZE=1': '<"a>',
+        }
+        for arg, expected in cases.items():
+            with self.subTest(arg=arg):
+                self.assertEqual(smtp_sink.envelope_path(arg), expected)
+
     def test_escapes_control_characters(self):
         # A carriage return would forge a second envelope line in the log, and
         # an escape sequence would rewrite the terminal of whoever reads it.

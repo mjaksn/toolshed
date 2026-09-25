@@ -90,6 +90,28 @@ def quoted(text):
     return visible(text.replace("\\", "\\\\").replace('"', '\\"'))
 
 
+def closing_bracket(text, start):
+    """Where the path opened by the `<` at `start` closes, or -1.
+
+    A quoted local part may hold a `>` of its own, as `<"a>b"@x.test>` does, so
+    the first one is not necessarily the end. Quoted strings are skipped, and
+    inside one a backslash takes the character after it literally.
+    """
+    in_quotes = False
+    i = start + 1
+    while i < len(text):
+        c = text[i]
+        if in_quotes and c == "\\":
+            i += 2
+            continue
+        if c == '"':
+            in_quotes = not in_quotes
+        elif c == ">" and not in_quotes:
+            return i
+        i += 1
+    return -1
+
+
 def envelope_path(arg):
     """The address out of a MAIL or RCPT argument, ESMTP parameters dropped.
 
@@ -104,9 +126,14 @@ def envelope_path(arg):
     """
     rest = arg.partition(":")[2].strip() or arg
     start = rest.find("<")
-    end = rest.find(">", start + 1)
-    if start != -1 and end != -1:
-        return visible(rest[start : end + 1])
+    if start != -1:
+        end = closing_bracket(rest, start)
+        if end == -1:
+            # An unbalanced quote leaves no bracket outside one. The first `>`
+            # is the best guess at where a malformed path meant to stop.
+            end = rest.find(">", start + 1)
+        if end != -1:
+            return visible(rest[start : end + 1])
     # No angle brackets. Anything after the first space is a parameter.
     return visible(rest.split(" ")[0])
 

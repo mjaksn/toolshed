@@ -50,12 +50,13 @@ endings are mixed by design.
 
 The envelope records the address on its own. A client sends `MAIL
 FROM:<a@b.test> SIZE=1234` once the server advertises `SIZE`, which it does,
-and the parameters after the address are not part of it. A control character
-in an address, such as a carriage return that would forge a second `From:`
-line or an escape sequence that would rewrite the terminal of whoever reads
-the file, is written out as an escape like `\r` rather than passed through.
-A greeting, HELO or EHLO, starts the session over and drops any envelope in
-progress, as RSET does.
+and the parameters after the address are not part of it. An address whose
+quoted local part holds a `>` of its own, such as `<"a>b"@b.test>`, is kept
+whole. A control character in an address, such as a carriage return that
+would forge a second `From:` line or an escape sequence that would rewrite the
+terminal of whoever reads the file, is written out as an escape like `\r`
+rather than passed through. A greeting, HELO or EHLO, starts the session over
+and drops any envelope in progress, as RSET does.
 
 ## A warning about where you point it
 
