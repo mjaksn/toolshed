@@ -66,8 +66,11 @@ gets its message logged. This is fine on a network you control and is an open
 relay-shaped hole on one you do not, so bind it to a LAN address and leave it
 off the public internet. That is why `--bind` has to be given. A message larger
 than 10 MB, counted in octets as the `SIZE` the server advertises promises, is
-refused with a 552 and the connection carries on; a client that goes quiet for
-five minutes is hung up on.
+refused with a 552 and the connection carries on. A single line of any length
+up to that limit is taken, whatever RFC 5321 says about a thousand octets,
+because plenty of devices ignore it; one line longer than the whole limit ends
+the connection instead of drawing the 552. A client that goes quiet for five
+minutes is hung up on.
 
 ## Tests
 

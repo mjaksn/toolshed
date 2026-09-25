@@ -376,14 +376,14 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--bind", err.getvalue())
 
-    def test_the_address_given_is_the_one_bound(self):
+    def test_the_server_starts_on_the_address_given_with_the_line_limit(self):
         class Stop(Exception):
             pass
 
         seen = {}
 
-        async def start_server(handler, host, port):
-            seen.update(host=host, port=port)
+        async def start_server(handler, host, port, **kwargs):
+            seen.update(host=host, port=port, **kwargs)
             raise Stop
 
         argv = ["smtp_sink.py", "--bind", "192.0.2.10", "--port", "2600"]
@@ -393,7 +393,11 @@ class CommandLineTests(unittest.TestCase):
             self.assertRaises(Stop),
         ):
             asyncio.run(smtp_sink.main())
-        self.assertEqual(seen, {"host": "192.0.2.10", "port": 2600})
+        # The limit matters as much as the address. ServerTests start their
+        # server with the same one, and this is what keeps that honest.
+        self.assertEqual(
+            seen, {"host": "192.0.2.10", "port": 2600, "limit": smtp_sink.LINE_LIMIT}
+        )
 
 
 class ServerTests(unittest.IsolatedAsyncioTestCase):
@@ -407,7 +411,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             log=str(self.log), syslog_body=False, syslog_max=2000
         )
         self.server = await asyncio.start_server(
-            lambda r, w: smtp_sink.handle_client(r, w, self.args), "127.0.0.1", 0
+            lambda r, w: smtp_sink.handle_client(r, w, self.args), "127.0.0.1", 0,
+            limit=smtp_sink.LINE_LIMIT,
         )
         self.port = self.server.sockets[0].getsockname()[1]
         self.clients = []
@@ -576,6 +581,22 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             reply = await self.send_message(reader, writer, "é" * 60)
         self.assertTrue(reply[0].startswith("552"), reply)
         self.assertFalse(self.log.exists())
+
+    async def test_a_line_longer_than_64_kib_is_logged(self):
+        # asyncio's default line limit. RFC 5321 says 1000 octets, devices do
+        # not always listen, and the message is well within the size limit.
+        reader, writer = await self.connect()
+        reply = await self.send_message(reader, writer, "Subject: s\r\n\r\n" + "x" * 100_000)
+        self.assertTrue(reply and reply[0].startswith("250"), reply)
+        self.assertIn(b"x" * 100_000 + b"\r\n", self.log.read_bytes())
+
+    async def test_one_long_line_over_the_size_limit_gets_552(self):
+        reader, writer = await self.connect()
+        with mock.patch.object(smtp_sink, "MAX_MESSAGE_BYTES", 100_000):
+            reply = await self.send_message(reader, writer, "x" * 150_000)
+        self.assertTrue(reply and reply[0].startswith("552"), reply)
+        self.assertFalse(self.log.exists())
+        self.assertTrue((await self.command(reader, writer, "NOOP"))[0].startswith("250"))
 
     async def test_the_connection_survives_a_refused_message(self):
         reader, writer = await self.connect()

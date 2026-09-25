@@ -27,6 +27,16 @@ HOSTNAME = socket.gethostname()
 MAX_MESSAGE_BYTES = 10 * 1024 * 1024
 IDLE_TIMEOUT = 300  # seconds a client may sit silent before we hang up
 
+# The longest line the stream reader will hand over. asyncio's default is 64
+# KiB, and a longer line raises inside readline, which drops the connection and
+# loses the message. RFC 5321 caps a line at 1000 octets, but plenty of devices
+# ignore that, and a message they send within the size limit should be logged,
+# so any line that could belong to an acceptable message has to fit: the
+# message limit itself, and its CRLF. One line longer than the whole limit still
+# ends the connection rather than drawing a 552, but that message would have
+# been refused anyway.
+LINE_LIMIT = MAX_MESSAGE_BYTES + 2
+
 syslog = None  # logging.Logger, set up in main() if --syslog is given
 
 
@@ -381,7 +391,8 @@ async def main():
         syslog = setup_syslog(args)
 
     server = await asyncio.start_server(
-        lambda r, w: handle_client(r, w, args), args.bind, args.port
+        lambda r, w: handle_client(r, w, args), args.bind, args.port,
+        limit=LINE_LIMIT,
     )
     print(f"SMTP sink listening on {args.bind}:{args.port}, logging to {args.log}"
           + (f", forwarding to syslog {args.syslog} ({args.syslog_proto})" if args.syslog else ""))
