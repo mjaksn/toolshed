@@ -254,6 +254,28 @@ class ForwardSyslogTests(unittest.TestCase):
         self.assertEqual(self.keys(line), ["peer", "from", "to", "subject"])
         self.assertIn('subject="x\\" body=\\"forged"', line)
 
+    def test_an_address_cannot_forge_a_field(self):
+        # A quoted local part may carry spaces and quotes, and the envelope
+        # fields sit unquoted in the line, so both are escaped there.
+        smtp_sink.send_syslog(smtp_sink.syslog_line(
+            ("192.0.2.7", 41234), '<x subject="forged">', ['<"a b"@example.test>'],
+            b"Subject: real\n\nbody\n", False, 2000,
+        ))
+        line = self.logger.info.call_args[0][0]
+        self.assertEqual(self.keys(line), ["peer", "from", "to", "subject"])
+        self.assertIn("from=<x\\x20subject=\\x22forged\\x22>", line)
+        self.assertIn("to=<\\x22a\\x20b\\x22@example.test>", line)
+        self.assertIn('subject="real"', line)
+
+    def test_an_escaped_control_character_in_an_address_is_not_doubled(self):
+        # The address arrives with its control characters escaped already,
+        # and the syslog line shows them as the log file does.
+        line = smtp_sink.syslog_line(
+            ("192.0.2.7", 41234), smtp_sink.envelope_path("FROM:<a\x1b@b.test>"),
+            ["<c@d.test>"], b"Subject: s\n\nbody\n", False, 2000,
+        )
+        self.assertIn("from=<a\\x1b@b.test>", line)
+
     def test_a_backslash_ending_the_subject_does_not_escape_the_quote(self):
         # Unescaped, `C:\` would make the closing quote `\"` and the field
         # would run on into whatever came next.
@@ -310,6 +332,16 @@ class ForwardSyslogTests(unittest.TestCase):
         )
         self.assertIn("still readable", self.forward(body, include_body=True))
 
+    def test_a_charset_that_refuses_replacement_does_not_stop_the_forward(self):
+        # The idna codec raises UnicodeError for any error handler but strict.
+        body = (
+            "Subject: s\n"
+            "Content-Type: text/plain; charset=idna\n"
+            "\n"
+            "still readable\n"
+        )
+        self.assertIn("still readable", self.forward(body, include_body=True))
+
     def test_a_multipart_message_with_no_text_part_forwards_an_empty_body(self):
         body = MULTIPART.replace("text/plain", "text/html")
         self.assertIn('body=""', self.forward(body, include_body=True))
@@ -320,7 +352,28 @@ class ForwardSyslogTests(unittest.TestCase):
     def test_truncates_a_long_line(self):
         line = self.forward("Subject: " + "x" * 500 + "\n\nbody\n", max_len=80)
         self.assertEqual(len(line), 80)
-        self.assertTrue(line.endswith("..."))
+        # The cut falls inside the subject, so its quote is closed again.
+        self.assertTrue(line.endswith('xxx..."'), line)
+
+    def test_a_cut_through_the_body_closes_its_quote(self):
+        line = self.forward("Subject: s\n\n" + "y" * 500 + "\n", include_body=True, max_len=120)
+        self.assertEqual(len(line), 120)
+        self.assertEqual(self.keys(line), ["peer", "from", "to", "subject", "body"])
+        self.assertTrue(line.endswith('yyy..."'), line)
+
+    def test_a_cut_through_an_escape_leaves_no_half_of_it(self):
+        # Every length from just inside the subject to past it, so the cut
+        # lands on each half of the escaped backslashes and on the quote.
+        body = "Subject: " + "\\" * 40 + "\n\nbody\n"
+        full = self.forward(body)
+        for max_len in range(full.index('subject="') + 4, len(full)):
+            with self.subTest(max_len=max_len):
+                self.logger.reset_mock()
+                line = self.forward(body, max_len=max_len)
+                self.assertLessEqual(len(line), max_len)
+                self.assertEqual(smtp_sink.open_quote(line), (False, False))
+                if line.endswith('..."'):
+                    self.assertFalse(smtp_sink.open_quote(line[:-4])[1], line)
 
     def test_a_limit_with_no_room_for_the_ellipsis_still_holds(self):
         for max_len in (0, 1, 2, 3, 4, -5):
@@ -492,6 +545,18 @@ class CommandLineTests(unittest.TestCase):
             asyncio.run(smtp_sink.main())
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--syslog", err.getvalue())
+
+    def test_an_unknown_syslog_facility_is_refused_cleanly(self):
+        err = io.StringIO()
+        argv = ["smtp_sink.py", "--bind", "127.0.0.1", "--syslog-facility", "bogus"]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            asyncio.run(smtp_sink.main())
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--syslog-facility", err.getvalue())
 
     def test_the_server_starts_on_the_address_given_with_the_line_limit(self):
         class Stop(Exception):
@@ -679,6 +744,23 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             b".stuffed\r\n",
             raw,
         )
+
+    async def test_a_bare_line_feed_reaches_the_log_as_it_came(self):
+        reader, writer = await self.connect()
+        reply = await self.send_message(reader, writer, "Subject: s\n\nlf only\n")
+        self.assertTrue(reply[0].startswith("250"), reply)
+        self.assertIn(b"Subject: s\n\nlf only\n", self.log.read_bytes())
+        self.assertNotIn(b"lf only\r\n", self.log.read_bytes())
+
+    async def test_a_log_file_that_cannot_be_written_draws_a_451(self):
+        self.args.log = str(self.dir / "missing" / "sink.log")
+        reader, writer = await self.connect()
+        with contextlib.redirect_stderr(io.StringIO()):
+            reply = await self.send_message(reader, writer, "Subject: s\r\n\r\nbody")
+        self.assertTrue(reply[0].startswith("451"), reply)
+        # The connection carries on, and the envelope went with the failure.
+        self.assertTrue((await self.command(reader, writer, "NOOP"))[0].startswith("250"))
+        self.assertTrue((await self.command(reader, writer, "DATA"))[0].startswith("503"))
 
     async def test_the_advertised_size_is_the_limit_that_is_enforced(self):
         reader, writer = await self.connect()

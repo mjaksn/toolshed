@@ -9,7 +9,8 @@ The use it was written for is a device that can only report by sending mail: a
 printer, a NAS, a UPS, a switch. Point it here and the alerts land in a file
 you can read and in whatever already watches your syslog.
 
-Python 3, standard library only, nothing to install.
+Python 3.11 or later, standard library only, nothing to install. Earlier
+versions lack the hook the sink uses to survive a syslog server being down.
 
 ```
 python smtp_sink.py --bind 192.168.1.50 --port 2525 --log alerts.log
@@ -25,7 +26,7 @@ python smtp_sink.py --bind 192.168.1.50 --syslog 192.168.1.10 --syslog-body
 | `--syslog-proto udp\|tcp` | Transport for the above, `udp` by default. |
 | `--syslog-facility NAME` | Syslog facility, `local0` by default. |
 | `--syslog-body` | Put the message body in the syslog line as well as the summary. Base64 and quoted-printable are decoded, and a multipart message contributes its first text/plain part rather than its boundaries and attachments. |
-| `--syslog-max N` | Truncate syslog lines to N characters, 2000 by default. A line over the limit ends in an ellipsis, unless N leaves no room for one, in which case it is simply cut to N. |
+| `--syslog-max N` | Truncate syslog lines to N characters, 2000 by default. A line over the limit ends in an ellipsis, unless N leaves no room for one, in which case it is simply cut to N. A cut through the subject or body puts a closing quote after the ellipsis, so the field still ends where a parser expects. |
 
 The syslog line carries the subject as text: a device that puts a degree sign
 or an accent in one sends it as an RFC 2047 encoded word, and that is decoded
@@ -36,7 +37,10 @@ The subject and body sit between double quotes in that line, and both come
 from whoever sent the message. A quote or backslash inside either is escaped
 with a backslash, and a control character is written out as an escape like
 `\x1b`, so neither can end its field early, fake a field of its own, or put an
-escape sequence in front of whoever reads the collector's output.
+escape sequence in front of whoever reads the collector's output. The sender
+and recipients sit in the line unquoted, and a quoted local part can carry a
+space or a quote of its own, so in those fields a quote is written as `\x22`
+and a space as `\x20`, in the same style as the control characters.
 
 The client gets its 250 once the message is in the file, before anything is
 forwarded, and its connection goes straight back to reading commands. The
@@ -53,8 +57,10 @@ syslog line was trimmed down to. Nothing in it is decoded and written back
 out, so a device sending 8-bit text in some encoding of its own keeps its
 bytes intact rather than having them replaced. One consequence worth knowing
 before you point a tool at the file: the envelope lines the sink adds end in
-LF and the messages between them keep the CRLF they arrived with, so the
-endings are mixed by design.
+LF and the messages between them keep the line endings they arrived with,
+CRLF or a bare LF, so the endings are mixed by design. A message that cannot
+be written to the file, because the disk is full or the file cannot be
+opened, draws a 451 so the client knows to try again.
 
 The envelope records the address on its own. A client sends `MAIL
 FROM:<a@b.test> SIZE=1234` once the server advertises `SIZE`, which it does,

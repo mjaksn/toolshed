@@ -19,6 +19,7 @@ import logging
 import logging.handlers
 import socket
 import sys
+import threading
 from email.errors import HeaderParseError
 from email.header import decode_header, make_header
 from email.parser import BytesParser
@@ -43,6 +44,10 @@ LINE_LIMIT = MAX_MESSAGE_BYTES + 2
 # apiece, because a stalled syslog server is exactly when it fills, and anyone
 # on the network can send mail.
 FORWARD_QUEUE_SIZE = 1000
+
+# Held while a message is appended. The writes run in worker threads, off the
+# event loop, and two messages finishing together must not interleave.
+log_lock = threading.Lock()
 
 syslog = None  # logging.Logger, set up in main() if --syslog is given
 forwards = None  # asyncio.Queue of syslog lines, set up by start_forwarder()
@@ -70,12 +75,12 @@ def write_entry(log_path, peer, mail_from, rcpts, body):
         f"To:       {', '.join(rcpts)}\n"
         + "-" * 78 + "\n"
     )
-    with open(log_path, "ab") as f:
-        f.write(header.encode("utf-8"))
-        f.write(body)
-        if not body.endswith(b"\n"):
-            f.write(b"\n")
-        f.write(b"\n")
+    entry = header.encode("utf-8") + body
+    if not body.endswith(b"\n"):
+        entry += b"\n"
+    entry += b"\n"
+    with log_lock, open(log_path, "ab") as f:
+        f.write(entry)
         f.flush()
 
 
@@ -107,6 +112,61 @@ def quoted(text):
     characters.
     """
     return visible(text.replace("\\", "\\\\").replace('"', '\\"'))
+
+
+def bare(text):
+    """A value for one of the unquoted envelope fields in the syslog line.
+
+    The addresses come from the client as well, and a quoted local part can
+    carry spaces and quotes, so `<x subject="forged">` would otherwise add a
+    field of its own. The value has been through `visible` already, so the
+    quote and the space are written out in the same style as its escapes
+    rather than with a backslash of their own, which would double every
+    backslash `visible` wrote.
+    """
+    return text.replace('"', "\\x22").replace(" ", "\\x20")
+
+
+def open_quote(text):
+    """Whether `text` ends inside a quoted field, and inside an escape there."""
+    inside = escaped = False
+    for c in text:
+        if escaped:
+            escaped = False
+        elif inside and c == "\\":
+            escaped = True
+        elif c == '"':
+            inside = not inside
+    return inside, escaped
+
+
+def truncate(line, max_len):
+    """`line` cut to `max_len`, a quoted field it cuts through closed again.
+
+    With the body included, the cut nearly always lands inside it, and a field
+    left open is one a strict key="value" parser rejects outright.
+    """
+    # A bound under four characters leaves no room for the ellipsis, and a
+    # negative one is not a length at all. Either way the line is simply cut
+    # to fit, because a truncation that runs past the limit it was given is
+    # worse than a line with nothing left in it.
+    keep = max(max_len, 0)
+    if keep <= 3:
+        return line[:keep]
+    cut = line[: keep - 3]
+    if not open_quote(cut)[0]:
+        return cut + "..."
+    # One character fewer, to make room for the closing quote.
+    cut = line[: keep - 4]
+    inside, escaped = open_quote(cut)
+    if not inside:
+        # The character given up was the field's opening quote.
+        return cut + "..."
+    if escaped:
+        # Half an escape. Left in, it would take the first dot of the
+        # ellipsis as `\.`, which a strict parser refuses.
+        cut = cut[:-1]
+    return cut + '..."'
 
 
 def closing_bracket(text, start):
@@ -143,7 +203,8 @@ def envelope_path(arg):
     The result goes to the log file, the syslog line and stdout, so control
     characters are escaped here, once, rather than at each of those.
     """
-    rest = arg.partition(":")[2].strip() or arg
+    _, colon, rest = arg.partition(":")
+    rest = rest.strip() if colon else arg
     start = rest.find("<")
     if start != -1:
         end = closing_bracket(rest, start)
@@ -180,7 +241,9 @@ def part_text(part):
     charset = part.get_content_charset() or "utf-8"
     try:
         return payload.decode(charset, "replace")
-    except LookupError:  # a charset name Python does not know
+    # A charset name Python does not know, or a codec such as idna that
+    # refuses the "replace" error handler outright.
+    except (LookupError, UnicodeError):
         return payload.decode("utf-8", "replace")
 
 
@@ -214,19 +277,14 @@ def syslog_line(peer, mail_from, rcpts, body, include_body, max_len):
     subject = subject.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
     subject = " ".join(subject.split())
     line = (
-        f'peer={peer[0]} from={mail_from} to={",".join(rcpts)} '
+        f'peer={peer[0]} from={bare(mail_from)} to={",".join(bare(r) for r in rcpts)} '
         f'subject="{quoted(subject)}"'
     )
     if include_body:
         text = " | ".join(piece.strip() for piece in message_text(msg).splitlines() if piece.strip())
         line += f' body="{quoted(text)}"'
     if len(line) > max_len:
-        # A bound under four characters leaves no room for the ellipsis, and a
-        # negative one is not a length at all. Either way the line is simply
-        # cut to fit, because a truncation that runs past the limit it was
-        # given is worse than a line with nothing left in it.
-        keep = max(max_len, 0)
-        line = line[: keep - 3] + "..." if keep > 3 else line[:keep]
+        line = truncate(line, max_len)
     return line
 
 
@@ -274,17 +332,21 @@ async def handle_client(reader, writer, args):
         writer.write((line + "\r\n").encode("ascii", "replace"))
         await writer.drain()
 
-    async def readline_raw():
+    async def readline_split():
+        """A line as (content, terminator), the terminator as it arrived."""
         raw = await asyncio.wait_for(reader.readline(), IDLE_TIMEOUT)
         if not raw:
             raise ConnectionResetError
         # One terminator, not every trailing CR and LF. `rstrip` would eat a
         # carriage return that belongs to the message.
         if raw.endswith(b"\r\n"):
-            return raw[:-2]
+            return raw[:-2], b"\r\n"
         if raw.endswith(b"\n"):
-            return raw[:-1]
-        return raw
+            return raw[:-1], b"\n"
+        return raw, b""
+
+    async def readline_raw():
+        return (await readline_split())[0]
 
     async def readline():
         """A command line, as text. DATA reads bytes instead."""
@@ -334,27 +396,41 @@ async def handle_client(reader, writer, args):
                 chunks = []
                 size = 0
                 while True:
-                    dline = await readline_raw()
+                    dline, eol = await readline_split()
                     if dline == b".":
                         break
                     if dline.startswith(b".."):
                         dline = dline[1:]  # undo dot-stuffing
-                    # The message in octets, its CRLF included, which is what
-                    # SIZE promises the client and what the client's own
-                    # `size=` parameter counts. Measuring decoded characters
-                    # let a message of 8-bit text run well past the limit.
-                    size += len(dline) + 2
+                    # The message in octets, its line ending included, which
+                    # is what SIZE promises the client and what the client's
+                    # own `size=` parameter counts. Measuring decoded
+                    # characters let a message of 8-bit text run well past
+                    # the limit.
+                    size += len(dline) + len(eol)
                     if size > MAX_MESSAGE_BYTES:
                         chunks = None
                     if chunks is not None:
-                        chunks.append(dline)
+                        chunks.append(dline + eol)
                 if chunks is None:
                     await send("552 Message too large")
                 else:
                     # Rebuilt exactly as it came off the wire, dot-stuffing
-                    # undone and nothing else touched.
-                    body = b"".join(chunk + b"\r\n" for chunk in chunks)
-                    write_entry(args.log, peer, mail_from, rcpts, body)
+                    # undone and nothing else touched, a bare LF included.
+                    body = b"".join(chunks)
+                    try:
+                        # In a thread: up to the size limit in one write would
+                        # otherwise stall every other client on the loop.
+                        await asyncio.to_thread(
+                            write_entry, args.log, peer, mail_from, rcpts, body
+                        )
+                    except OSError as exc:
+                        # A full disk or a file that cannot be opened is a
+                        # transient failure the client should hear about and
+                        # retry, not a dropped connection.
+                        print(f"[{peer[0]}] could not log message: {exc}", file=sys.stderr)
+                        await send("451 Local error, message not logged")
+                        mail_from, rcpts = None, []
+                        continue
                     print(f"[{peer[0]}] logged message from {mail_from} to {rcpts}")
                     # The message is safe in the file, so the client hears so
                     # now, before the forward. Kept waiting on a syslog server
@@ -367,15 +443,22 @@ async def handle_client(reader, writer, args):
                         # sending it is left to the forwarder. Either way this
                         # connection goes straight back to reading commands,
                         # whatever state the syslog server is in.
-                        line = await asyncio.to_thread(
-                            syslog_line, peer, mail_from, rcpts, body,
-                            args.syslog_body, args.syslog_max,
-                        )
+                        # A message that cannot be summarised costs its forward,
+                        # never the connection the client already heard 250 on.
                         try:
-                            forwards.put_nowait(line)
-                        except asyncio.QueueFull:
-                            print(f"[{peer[0]}] syslog queue full, not forwarded;"
-                                  " the message is in the log file", file=sys.stderr)
+                            line = await asyncio.to_thread(
+                                syslog_line, peer, mail_from, rcpts, body,
+                                args.syslog_body, args.syslog_max,
+                            )
+                        except Exception as exc:
+                            print(f"[{peer[0]}] syslog line failed, not forwarded;"
+                                  f" the message is in the log file: {exc}", file=sys.stderr)
+                        else:
+                            try:
+                                forwards.put_nowait(line)
+                            except asyncio.QueueFull:
+                                print(f"[{peer[0]}] syslog queue full, not forwarded;"
+                                      " the message is in the log file", file=sys.stderr)
                 mail_from, rcpts = None, []
             elif verb == "RSET":
                 mail_from, rcpts = None, []
@@ -499,7 +582,9 @@ async def main():
     ap.add_argument("--syslog", type=syslog_address, metavar="HOST[:PORT]",
                     help="forward each message to this syslog server (default port 514); IPv6 as [::1]:514")
     ap.add_argument("--syslog-proto", choices=("udp", "tcp"), default="udp")
-    ap.add_argument("--syslog-facility", default="local0", help="syslog facility name, e.g. local0, mail, user")
+    ap.add_argument("--syslog-facility", default="local0",
+                    choices=sorted(logging.handlers.SysLogHandler.facility_names),
+                    help="syslog facility name, e.g. local0, mail, user")
     ap.add_argument("--syslog-body", action="store_true", help="include the message body in the syslog line, not just the summary")
     ap.add_argument("--syslog-max", type=int, default=2000, help="truncate syslog lines to this many characters")
     args = ap.parse_args()
