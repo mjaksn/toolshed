@@ -39,8 +39,12 @@ with a backslash, and a control character is written out as an escape like
 escape sequence in front of whoever reads the collector's output.
 
 The client gets its 250 once the message is in the file, before anything is
-forwarded, so a syslog server that is slow or has gone away never holds up the
-mail or leaves a client waiting long enough to send it twice.
+forwarded, and its connection goes straight back to reading commands. The
+syslog lines queue for a single sender, which sends them in order, so a syslog
+server that is slow or has gone away never holds up the mail, or leaves a
+client waiting long enough to send a message twice. The queue holds 1000
+lines; while it is full, a message still goes in the file, and its forward is
+dropped with a line on stderr.
 
 Without `--syslog` nothing is forwarded and the log file is the only record.
 

@@ -37,7 +37,16 @@ IDLE_TIMEOUT = 300  # seconds a client may sit silent before we hang up
 # been refused anyway.
 LINE_LIMIT = MAX_MESSAGE_BYTES + 2
 
+# How many lines can wait for syslog. Each is at most `--syslog-max`
+# characters, 2000 by default, so a full queue is a few megabytes. It holds
+# finished lines rather than the messages they came from, which can be 10 MB
+# apiece, because a stalled syslog server is exactly when it fills, and anyone
+# on the network can send mail.
+FORWARD_QUEUE_SIZE = 1000
+
 syslog = None  # logging.Logger, set up in main() if --syslog is given
+forwards = None  # asyncio.Queue of syslog lines, set up by start_forwarder()
+forwarder = None  # the asyncio.Task draining it
 
 
 def write_entry(log_path, peer, mail_from, rcpts, body):
@@ -193,9 +202,8 @@ def message_text(msg):
     return part_text(msg)
 
 
-def forward_syslog(peer, mail_from, rcpts, body, include_body, max_len):
-    if syslog is None:
-        return
+def syslog_line(peer, mail_from, rcpts, body, include_body, max_len):
+    """The one line a message becomes in syslog, no longer than `max_len`."""
     msg = BytesParser().parsebytes(body)
     raw_subject = msg.get("Subject")
     subject = "(no subject)" if raw_subject is None else header_text(str(raw_subject))
@@ -219,10 +227,44 @@ def forward_syslog(peer, mail_from, rcpts, body, include_body, max_len):
         # given is worse than a line with nothing left in it.
         keep = max(max_len, 0)
         line = line[: keep - 3] + "..." if keep > 3 else line[:keep]
+    return line
+
+
+def send_syslog(line):
+    """Hand one finished line to the syslog logger, if there is one."""
+    if syslog is None:
+        return
     try:
         syslog.info(line)
     except Exception as exc:
         print(f"syslog forward failed: {exc}", file=sys.stderr)
+
+
+def start_forwarder():
+    """Make the queue of lines waiting for syslog, and the task that drains it.
+
+    The task is kept in a module global as well as returned, because the event
+    loop holds tasks only weakly and one nobody holds can be collected while it
+    is still running. There is no draining at shutdown: the sink stops on
+    Ctrl-C, and whatever is still queued is in the log file already.
+    """
+    global forwards, forwarder
+    forwards = asyncio.Queue(maxsize=FORWARD_QUEUE_SIZE)
+    forwarder = asyncio.create_task(run_forwarder())
+    return forwarder
+
+
+async def run_forwarder():
+    """Send queued lines to syslog one at a time, in the order they came."""
+    while True:
+        line = await forwards.get()
+        try:
+            # Off the loop: `syslog.info` is synchronous, and a TCP handler
+            # whose server has gone away connects again inside `emit`, which
+            # blocks. Only this task waits on that, never an SMTP client.
+            await asyncio.to_thread(send_syslog, line)
+        finally:
+            forwards.task_done()
 
 
 async def handle_client(reader, writer, args):
@@ -319,14 +361,21 @@ async def handle_client(reader, writer, args):
                     # that has gone away, a client can time out and send the
                     # same message again, and the file would hold it twice.
                     await send("250 OK: queued")
-                    # Off the loop: `syslog.info` is synchronous, and a TCP
-                    # handler whose server has gone away reconnects inside
-                    # `emit`, which blocks. On the loop that stalls every other
-                    # connection the sink is holding.
-                    await asyncio.to_thread(
-                        forward_syslog, peer, mail_from, rcpts, body,
-                        args.syslog_body, args.syslog_max,
-                    )
+                    if syslog is not None:
+                        # Building the line parses the message, which is CPU
+                        # work up to the size limit, so it runs in a thread;
+                        # sending it is left to the forwarder. Either way this
+                        # connection goes straight back to reading commands,
+                        # whatever state the syslog server is in.
+                        line = await asyncio.to_thread(
+                            syslog_line, peer, mail_from, rcpts, body,
+                            args.syslog_body, args.syslog_max,
+                        )
+                        try:
+                            forwards.put_nowait(line)
+                        except asyncio.QueueFull:
+                            print(f"[{peer[0]}] syslog queue full, not forwarded;"
+                                  " the message is in the log file", file=sys.stderr)
                 mail_from, rcpts = None, []
             elif verb == "RSET":
                 mail_from, rcpts = None, []
@@ -457,6 +506,7 @@ async def main():
 
     if args.syslog:
         syslog = setup_syslog(args)
+        start_forwarder()
 
     server = await asyncio.start_server(
         lambda r, w: handle_client(r, w, args), args.bind, args.port,

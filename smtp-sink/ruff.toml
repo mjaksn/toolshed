@@ -11,7 +11,7 @@
 [lint]
 ignore = [
     # Three blind `except Exception` handlers, each one a deliberate bulkhead:
-    #   - `forward_syslog`, where the remote server is a UDP or TCP endpoint that can
+    #   - `send_syslog`, where the remote server is a UDP or TCP endpoint that can
     #     fail in as many ways as the network has; the message is already in the log
     #     file by then, so a failed forward is reported on stderr and nothing more;
     #   - the per-client handler, whose comment says the point outright: one bad client

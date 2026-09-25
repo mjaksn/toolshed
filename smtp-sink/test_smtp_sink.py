@@ -198,10 +198,10 @@ class ForwardSyslogTests(unittest.TestCase):
     def forward(self, body, include_body=False, max_len=2000):
         if isinstance(body, str):
             body = body.encode("utf-8")
-        smtp_sink.forward_syslog(
+        smtp_sink.send_syslog(smtp_sink.syslog_line(
             ("192.0.2.7", 41234), "<a@example.test>", ["<b@example.test>"],
             body, include_body, max_len,
-        )
+        ))
         self.assertEqual(self.logger.info.call_count, 1)
         return self.logger.info.call_args[0][0]
 
@@ -363,7 +363,7 @@ class ForwardSyslogTests(unittest.TestCase):
 
     def test_does_nothing_when_no_syslog_is_configured(self):
         with mock.patch.object(smtp_sink, "syslog", None):
-            smtp_sink.forward_syslog(("192.0.2.7", 1), "a", ["b"], "Subject: s\n\nx\n", False, 2000)
+            smtp_sink.send_syslog("peer=192.0.2.7 subject=\"s\"")
         self.logger.info.assert_not_called()
 
 
@@ -533,13 +533,19 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.port = self.server.sockets[0].getsockname()[1]
         self.clients = []
+        # The forwarder main starts when --syslog is given. It idles unless a
+        # test sets a syslog logger, since the handler queues nothing without.
+        self.forwarder = smtp_sink.start_forwarder()
         # The handler prints a line per accepted message, which is noise here.
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
         self.addCleanup(quiet.__exit__, None, None, None)
 
     async def asyncTearDown(self):
-        # The clients go first, and this is not tidiness. `wait_closed` waits
+        self.forwarder.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.forwarder
+        # The clients go next, and this is not tidiness. `wait_closed` waits
         # for the handlers still running, and a test that ends without QUIT
         # leaves one sitting in a read that does not give up for IDLE_TIMEOUT,
         # which is five minutes. Hanging up on it first ends that read at once.
@@ -699,25 +705,51 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(reply[0].startswith("552"), reply)
         self.assertFalse(self.log.exists())
 
-    async def test_the_reply_does_not_wait_for_syslog(self):
-        # A forward stuck on a syslog server that has gone away. The 250 has
-        # to come back regardless, or the client may time out and send again.
+    async def test_a_stalled_syslog_server_holds_up_nothing(self):
+        # A forward stuck on a syslog server that has gone away. The client
+        # gets its 250, and the same connection answers its next command and
+        # takes its next message, all while that forward is still stuck.
         started = threading.Event()
         released = threading.Event()
         self.addCleanup(released.set)
+        sent = []
 
-        def stalled_forward(*args):
+        def stalled(line):
             started.set()
             released.wait(REPLY_TIMEOUT * 2)
+            sent.append(line)
 
-        with mock.patch.object(smtp_sink, "forward_syslog", stalled_forward):
+        with mock.patch.object(smtp_sink, "syslog", mock.Mock(info=stalled)):
+            reader, writer = await self.connect()
+            reply = await self.send_message(reader, writer, "Subject: first\r\n\r\nbody")
+            self.assertTrue(reply and reply[0].startswith("250"), reply)
+            self.assertTrue(await asyncio.to_thread(started.wait, REPLY_TIMEOUT))
+            self.assertTrue((await self.command(reader, writer, "NOOP"))[0].startswith("250"))
+            reply = await self.send_message(reader, writer, "Subject: second\r\n\r\nbody")
+            self.assertTrue(reply and reply[0].startswith("250"), reply)
+            self.assertFalse(released.is_set())
+
+            # Let the server come back. Both lines go out, in the order sent.
+            released.set()
+            await asyncio.wait_for(smtp_sink.forwards.join(), REPLY_TIMEOUT)
+        self.assertEqual(len(sent), 2)
+        self.assertIn('subject="first"', sent[0])
+        self.assertIn('subject="second"', sent[1])
+        self.assertIn(b"Subject: second\r\n", self.log.read_bytes())
+
+    async def test_a_full_syslog_queue_costs_the_forward_not_the_message(self):
+        full = asyncio.Queue(maxsize=1)
+        full.put_nowait("a line nobody is sending")
+        err = io.StringIO()
+        with (
+            mock.patch.object(smtp_sink, "syslog", mock.Mock()),
+            mock.patch.object(smtp_sink, "forwards", full),
+            contextlib.redirect_stderr(err),
+        ):
             reader, writer = await self.connect()
             reply = await self.send_message(reader, writer, "Subject: s\r\n\r\nbody")
-            self.assertTrue(reply and reply[0].startswith("250"), reply)
-            # The forward did run, and was still stuck when the 250 arrived.
-            self.assertTrue(await asyncio.to_thread(started.wait, REPLY_TIMEOUT))
-            self.assertFalse(released.is_set())
-            released.set()
+        self.assertTrue(reply and reply[0].startswith("250"), reply)
+        self.assertIn("syslog queue full", err.getvalue())
         self.assertIn(b"Subject: s\r\n", self.log.read_bytes())
 
     async def test_a_line_longer_than_64_kib_is_logged(self):
