@@ -313,6 +313,12 @@ async def handle_client(reader, writer, args):
                     # undone and nothing else touched.
                     body = b"".join(chunk + b"\r\n" for chunk in chunks)
                     write_entry(args.log, peer, mail_from, rcpts, body)
+                    print(f"[{peer[0]}] logged message from {mail_from} to {rcpts}")
+                    # The message is safe in the file, so the client hears so
+                    # now, before the forward. Kept waiting on a syslog server
+                    # that has gone away, a client can time out and send the
+                    # same message again, and the file would hold it twice.
+                    await send("250 OK: queued")
                     # Off the loop: `syslog.info` is synchronous, and a TCP
                     # handler whose server has gone away reconnects inside
                     # `emit`, which blocks. On the loop that stalls every other
@@ -321,8 +327,6 @@ async def handle_client(reader, writer, args):
                         forward_syslog, peer, mail_from, rcpts, body,
                         args.syslog_body, args.syslog_max,
                     )
-                    print(f"[{peer[0]}] logged message from {mail_from} to {rcpts}")
-                    await send("250 OK: queued")
                 mail_from, rcpts = None, []
             elif verb == "RSET":
                 mail_from, rcpts = None, []

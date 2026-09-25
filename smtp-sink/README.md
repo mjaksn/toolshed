@@ -38,6 +38,10 @@ with a backslash, and a control character is written out as an escape like
 `\x1b`, so neither can end its field early, fake a field of its own, or put an
 escape sequence in front of whoever reads the collector's output.
 
+The client gets its 250 once the message is in the file, before anything is
+forwarded, so a syslog server that is slow or has gone away never holds up the
+mail or leaves a client waiting long enough to send it twice.
+
 Without `--syslog` nothing is forwarded and the log file is the only record.
 
 That file gets every message byte for byte as it arrived, whole, whatever the

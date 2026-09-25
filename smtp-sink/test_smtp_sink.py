@@ -25,6 +25,7 @@ import shutil
 import smtplib
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -581,6 +582,27 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             reply = await self.send_message(reader, writer, "é" * 60)
         self.assertTrue(reply[0].startswith("552"), reply)
         self.assertFalse(self.log.exists())
+
+    async def test_the_reply_does_not_wait_for_syslog(self):
+        # A forward stuck on a syslog server that has gone away. The 250 has
+        # to come back regardless, or the client may time out and send again.
+        started = threading.Event()
+        released = threading.Event()
+        self.addCleanup(released.set)
+
+        def stalled_forward(*args):
+            started.set()
+            released.wait(REPLY_TIMEOUT * 2)
+
+        with mock.patch.object(smtp_sink, "forward_syslog", stalled_forward):
+            reader, writer = await self.connect()
+            reply = await self.send_message(reader, writer, "Subject: s\r\n\r\nbody")
+            self.assertTrue(reply and reply[0].startswith("250"), reply)
+            # The forward did run, and was still stuck when the 250 arrived.
+            self.assertTrue(await asyncio.to_thread(started.wait, REPLY_TIMEOUT))
+            self.assertFalse(released.is_set())
+            released.set()
+        self.assertIn(b"Subject: s\r\n", self.log.read_bytes())
 
     async def test_a_line_longer_than_64_kib_is_logged(self):
         # asyncio's default line limit. RFC 5321 says 1000 octets, devices do
