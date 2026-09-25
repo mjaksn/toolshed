@@ -32,6 +32,12 @@ or an accent in one sends it as an RFC 2047 encoded word, and that is decoded
 on the way out. A subject that cannot be decoded is forwarded as it arrived
 rather than costing the whole line.
 
+The subject and body sit between double quotes in that line, and both come
+from whoever sent the message. A quote or backslash inside either is escaped
+with a backslash, and a control character is written out as an escape like
+`\x1b`, so neither can end its field early, fake a field of its own, or put an
+escape sequence in front of whoever reads the collector's output.
+
 Without `--syslog` nothing is forwarded and the log file is the only record.
 
 That file gets every message byte for byte as it arrived, whole, whatever the

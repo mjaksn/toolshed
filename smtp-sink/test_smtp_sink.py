@@ -20,6 +20,7 @@ import asyncio
 import base64
 import contextlib
 import io
+import re
 import shutil
 import smtplib
 import tempfile
@@ -218,6 +219,38 @@ class ForwardSyslogTests(unittest.TestCase):
                 line = self.forward(f"Subject: {raw}\n\nbody\n")
                 self.assertIn("peer=192.0.2.7", line)
                 self.assertIn(raw, line)
+
+    @staticmethod
+    def keys(line):
+        """The keys of the line, split the way a collector would split it.
+
+        A quoted value runs to the next quote that is not escaped, so a field
+        forged by a stray quote shows up here as a key that should not exist.
+        """
+        return [key for key, _ in re.findall(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)', line)]
+
+    def test_a_quote_in_the_subject_cannot_forge_a_field(self):
+        line = self.forward('Subject: x" body="forged\n\nbody\n')
+        self.assertEqual(self.keys(line), ["peer", "from", "to", "subject"])
+        self.assertIn('subject="x\\" body=\\"forged"', line)
+
+    def test_a_backslash_ending_the_subject_does_not_escape_the_quote(self):
+        # Unescaped, `C:\` would make the closing quote `\"` and the field
+        # would run on into whatever came next.
+        line = self.forward("Subject: C:\\\n\nbody\n")
+        self.assertTrue(line.endswith('subject="C:\\\\"'), line)
+        self.assertEqual(self.keys(line), ["peer", "from", "to", "subject"])
+
+    def test_control_characters_in_the_subject_are_escaped(self):
+        line = self.forward("Subject: alert\x1b[2J\n\nbody\n")
+        self.assertNotIn("\x1b", line)
+        self.assertIn('subject="alert\\x1b[2J"', line)
+
+    def test_the_body_is_escaped_the_same_way(self):
+        line = self.forward('Subject: s\n\nhi\x1b[31m "there" \\ done\n', include_body=True)
+        self.assertNotIn("\x1b", line)
+        self.assertIn('body="hi\\x1b[31m \\"there\\" \\\\ done"', line)
+        self.assertEqual(self.keys(line), ["peer", "from", "to", "subject", "body"])
 
     def test_says_so_when_there_is_no_subject(self):
         self.assertIn('subject="(no subject)"', self.forward("\nbody\n"))

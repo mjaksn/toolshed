@@ -76,6 +76,20 @@ def visible(text):
     )
 
 
+def quoted(text):
+    """A value for one of the quoted fields in the syslog line.
+
+    The subject and body come from the message, which anyone on the network can
+    write, and they sit between double quotes in a line a collector parses by
+    key. A quote inside one would end the field early and let the rest pose as
+    a field of its own, so `subject: x" body="forged` could fake a body. Quotes
+    and backslashes are escaped first, so a backslash that arrived stays
+    distinguishable from the escapes `visible` then adds for control
+    characters.
+    """
+    return visible(text.replace("\\", "\\\\").replace('"', '\\"'))
+
+
 def envelope_path(arg):
     """The address out of a MAIL or RCPT argument, ESMTP parameters dropped.
 
@@ -156,11 +170,11 @@ def forward_syslog(peer, mail_from, rcpts, body, include_body, max_len):
     subject = " ".join(subject.split())
     line = (
         f'peer={peer[0]} from={mail_from} to={",".join(rcpts)} '
-        f'subject="{subject}"'
+        f'subject="{quoted(subject)}"'
     )
     if include_body:
         text = " | ".join(piece.strip() for piece in message_text(msg).splitlines() if piece.strip())
-        line += f' body="{text}"'
+        line += f' body="{quoted(text)}"'
     if len(line) > max_len:
         # A bound under four characters leaves no room for the ellipsis, and a
         # negative one is not a length at all. Either way the line is simply
