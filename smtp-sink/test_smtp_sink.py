@@ -138,6 +138,35 @@ class WriteEntryTests(unittest.TestCase):
         self.assertEqual(text.count("Received:"), 2)
 
 
+class EnvelopePathTests(unittest.TestCase):
+    def test_takes_the_address_and_drops_the_parameters(self):
+        cases = {
+            "FROM:<a@b.test> SIZE=99 BODY=8BITMIME": "<a@b.test>",
+            "TO:<b@b.test> NOTIFY=FAILURE": "<b@b.test>",
+            "FROM:<>": "<>",
+            "FROM:a@b.test SIZE=99": "a@b.test",
+        }
+        for arg, expected in cases.items():
+            with self.subTest(arg=arg):
+                self.assertEqual(smtp_sink.envelope_path(arg), expected)
+
+    def test_escapes_control_characters(self):
+        # A carriage return would forge a second envelope line in the log, and
+        # an escape sequence would rewrite the terminal of whoever reads it.
+        cases = {
+            "FROM:<a\rb@x.test> SIZE=1": "<a\\rb@x.test>",
+            "TO:<a\x1b[2Jb@x.test>": "<a\\x1b[2Jb@x.test>",
+            "FROM:<a\x00b@x.test>": "<a\\x00b@x.test>",
+            "FROM:a\rb@x.test SIZE=1": "a\\rb@x.test",
+        }
+        for arg, expected in cases.items():
+            with self.subTest(arg=arg):
+                self.assertEqual(smtp_sink.envelope_path(arg), expected)
+
+    def test_leaves_printable_non_ascii_alone(self):
+        self.assertEqual(smtp_sink.envelope_path("TO:<caf\xe9@b.test>"), "<caf\xe9@b.test>")
+
+
 class ForwardSyslogTests(unittest.TestCase):
     def setUp(self):
         self.logger = mock.Mock()
@@ -374,6 +403,32 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("To:       <b@example.test>\n", text)
         self.assertNotIn("SIZE=99", text)
         self.assertNotIn("NOTIFY", text)
+
+    async def test_a_forged_address_cannot_add_a_line_to_the_log(self):
+        reader, writer = await self.connect()
+        await self.command(reader, writer, "EHLO client.example.test")
+        # The CR survives the line reader, which splits on LF, so it reaches
+        # the handler inside the address exactly as an attacker would send it.
+        writer.write(b"MAIL FROM:<evil\rFrom:     <ceo@example.test>>\r\n")
+        await writer.drain()
+        await read_reply(reader)
+        writer.write(b"RCPT TO:<b@example.test\x1b[2J>\r\n")
+        await writer.drain()
+        await read_reply(reader)
+        await self.command(reader, writer, "DATA")
+        writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+        await writer.drain()
+        reply = await read_reply(reader)
+        self.assertTrue(reply[0].startswith("250"), reply)
+
+        envelope = self.log.read_bytes().split(b"-" * 78)[0]
+        controls = [b for b in envelope if b < 0x20 and b != 0x0A]
+        self.assertEqual(controls, [], envelope)
+        # One From line, carrying the forgery as visible text.
+        self.assertEqual(
+            [line for line in envelope.split(b"\n") if line.startswith(b"From:")],
+            [b"From:     <evil\\rFrom:     <ceo@example.test>"],
+        )
 
     async def test_the_null_sender_is_kept(self):
         reader, writer = await self.connect()

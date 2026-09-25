@@ -60,6 +60,22 @@ def write_entry(log_path, peer, mail_from, rcpts, body):
         f.flush()
 
 
+def visible(text):
+    """Text with every control character written out as an escape.
+
+    The envelope lines in the log are line-oriented, and the file is read with
+    cat and tail. A carriage return inside an address would let a client forge
+    a second From line, and an escape sequence would rewrite the terminal of
+    whoever reads it. Shown as escapes rather than dropped, so the record still
+    says what was sent. A backslash that arrived in the address is ambiguous
+    with those escapes; that is accepted, since no real address carries one.
+    """
+    return "".join(
+        c if c.isprintable() else c.encode("unicode_escape").decode("ascii")
+        for c in text
+    )
+
+
 def envelope_path(arg):
     """The address out of a MAIL or RCPT argument, ESMTP parameters dropped.
 
@@ -68,14 +84,17 @@ def envelope_path(arg):
     have to come off or they end up recorded as part of the address. Python's
     own smtplib appends `size=` to every message. The null sender, `<>`, is
     kept as it is, because it says something.
+
+    The result goes to the log file, the syslog line and stdout, so control
+    characters are escaped here, once, rather than at each of those.
     """
     rest = arg.partition(":")[2].strip() or arg
     start = rest.find("<")
     end = rest.find(">", start + 1)
     if start != -1 and end != -1:
-        return rest[start : end + 1]
+        return visible(rest[start : end + 1])
     # No angle brackets. Anything after the first space is a parameter.
-    return rest.split(" ")[0]
+    return visible(rest.split(" ")[0])
 
 
 def header_text(value):
