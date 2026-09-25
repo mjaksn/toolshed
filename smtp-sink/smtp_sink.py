@@ -266,6 +266,12 @@ async def handle_client(reader, writer, args):
                 rcpts = []
                 await send("250 OK")
             elif verb == "RCPT":
+                # A recipient belongs to a transaction, and there is none until
+                # MAIL (RFC 5321, 3.3). A 250 here would tell the client the
+                # recipient was taken when DATA is going to be refused anyway.
+                if mail_from is None:
+                    await send("503 Need MAIL first")
+                    continue
                 rcpts.append(envelope_path(arg))
                 await send("250 OK")
             elif verb == "DATA":

@@ -612,6 +612,21 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(reply[0].startswith("503"), reply)
         self.assertFalse(self.log.exists())
 
+    async def test_rcpt_before_mail_is_refused(self):
+        reader, writer = await self.connect()
+        await self.command(reader, writer, "EHLO client.example.test")
+        reply = await self.command(reader, writer, "RCPT TO:<b@example.test>")
+        self.assertTrue(reply[0].startswith("503"), reply)
+        # Refused, not remembered: a transaction started afterwards carries
+        # only the recipients given inside it.
+        await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+        await self.command(reader, writer, "RCPT TO:<c@example.test>")
+        await self.command(reader, writer, "DATA")
+        writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+        await writer.drain()
+        self.assertTrue((await read_reply(reader))[0].startswith("250"))
+        self.assertIn("To:       <c@example.test>\n", self.log.read_bytes().decode("utf-8"))
+
     async def test_rset_clears_the_envelope(self):
         reader, writer = await self.connect()
         await self.command(reader, writer, "EHLO client.example.test")
