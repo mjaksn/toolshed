@@ -586,6 +586,18 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(reply[0].startswith("503"), reply)
         self.assertFalse(self.log.exists())
 
+    async def test_a_greeting_clears_the_envelope(self):
+        for greeting in ("EHLO again.example.test", "HELO again.example.test"):
+            with self.subTest(greeting=greeting):
+                reader, writer = await self.connect()
+                await self.command(reader, writer, "EHLO client.example.test")
+                await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+                await self.command(reader, writer, "RCPT TO:<b@example.test>")
+                await self.command(reader, writer, greeting)
+                reply = await self.command(reader, writer, "DATA")
+                self.assertTrue(reply[0].startswith("503"), reply)
+        self.assertFalse(self.log.exists())
+
     async def test_rset_clears_the_envelope(self):
         reader, writer = await self.connect()
         await self.command(reader, writer, "EHLO client.example.test")

@@ -222,9 +222,15 @@ async def handle_client(reader, writer, args):
             verb = verb.upper()
             arg = arg.strip()
 
+            # A greeting starts the session over, envelope included, exactly
+            # as RSET would (RFC 5321, 4.1.4). Otherwise MAIL and RCPT, a
+            # second EHLO, then DATA would log the message against the old
+            # envelope instead of refusing it.
             if verb == "HELO":
+                mail_from, rcpts = None, []
                 await send(f"250 {HOSTNAME}")
             elif verb == "EHLO":
+                mail_from, rcpts = None, []
                 await send(f"250-{HOSTNAME}")
                 await send(f"250-SIZE {MAX_MESSAGE_BYTES}")
                 await send("250 8BITMIME")

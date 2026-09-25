@@ -54,6 +54,8 @@ and the parameters after the address are not part of it. A control character
 in an address, such as a carriage return that would forge a second `From:`
 line or an escape sequence that would rewrite the terminal of whoever reads
 the file, is written out as an escape like `\r` rather than passed through.
+A greeting, HELO or EHLO, starts the session over and drops any envelope in
+progress, as RSET does.
 
 ## A warning about where you point it
 
