@@ -384,10 +384,43 @@ def shown_address(address):
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
+class PatientSysLogHandler(logging.handlers.SysLogHandler):
+    """A SysLogHandler that outlasts its syslog server being down.
+
+    The standard one connects a TCP socket while it is being built and raises
+    if nothing is listening, which stopped the sink from starting at all, so no
+    mail was logged either. Once a TCP send has failed it also keeps the dead
+    socket, so every later message fails on it and it never connects again.
+    Here a failed connect or send costs one line on stderr, the socket is
+    dropped, and the next message tries afresh.
+    """
+
+    def createSocket(self):
+        try:
+            super().createSocket()
+        except OSError as exc:
+            self.socket = None
+            print(f"syslog {shown_address(self.address)}: {exc}", file=sys.stderr)
+
+    def emit(self, record):
+        if not self.socket:
+            self.createSocket()
+        if self.socket:
+            super().emit(record)
+
+    def handleError(self, record):
+        # One line rather than the logging module's traceback per message.
+        exc = sys.exc_info()[1]
+        print(f"syslog {shown_address(self.address)}: {exc}", file=sys.stderr)
+        if isinstance(exc, OSError) and self.socktype == socket.SOCK_STREAM and self.socket:
+            self.socket.close()
+            self.socket = None
+
+
 def setup_syslog(args):
     """Build a logger that ships each record to the remote syslog server."""
     socktype = socket.SOCK_STREAM if args.syslog_proto == "tcp" else socket.SOCK_DGRAM
-    handler = logging.handlers.SysLogHandler(
+    handler = PatientSysLogHandler(
         address=args.syslog,
         facility=args.syslog_facility,
         socktype=socktype,

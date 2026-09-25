@@ -2,15 +2,17 @@
 
     python -m unittest
 
-Three layers. The first two call `write_entry` and `forward_syslog` directly,
-because what they write is the whole point of the tool and neither needs a
-socket. The third starts the real server on an ephemeral port on the loopback
-address and speaks SMTP to it, so the replies and the log file are checked
-against the same code path a mail client drives.
+Most of it calls the module's functions directly, because what they produce
+is the point of the tool and none of them needs a socket. `main` is run with
+`start_server` replaced, so the command line is checked without anything
+listening. The protocol tests start the real server on an ephemeral port on
+the loopback address and speak SMTP to it, so the replies and the log file are
+checked against the same code path a mail client drives.
 
-Nothing here contacts a syslog server. The module level `syslog` logger is
-replaced with a mock, which is also how the "no syslog configured" case is
-tested: that is the module's own default.
+Nothing here contacts a real syslog server. Most tests replace the module's
+`syslog` logger with a mock, which is also how the "no syslog configured" case
+is tested, since that is the module's own default. The tests for a server that
+is down open their own listener on the loopback address instead.
 """
 
 from __future__ import annotations
@@ -20,9 +22,11 @@ import asyncio
 import base64
 import contextlib
 import io
+import logging
 import re
 import shutil
 import smtplib
+import socket
 import sys
 import tempfile
 import threading
@@ -388,6 +392,79 @@ class SyslogAddressTests(unittest.TestCase):
     def test_writes_one_back_out_the_way_it_is_given(self):
         self.assertEqual(smtp_sink.shown_address(("192.0.2.1", 514)), "192.0.2.1:514")
         self.assertEqual(smtp_sink.shown_address(("::1", 514)), "[::1]:514")
+
+
+class SyslogHandlerTests(unittest.TestCase):
+    """A TCP syslog server that is down, over a real loopback socket."""
+
+    def setUp(self):
+        # `setup_syslog` adds a handler to one process-wide logger; take every
+        # one back off so no test sees another's.
+        logger = logging.getLogger("smtp_sink")
+        self.addCleanup(self._remove_handlers, logger)
+        err = io.StringIO()
+        self.err = err
+        quiet = contextlib.redirect_stderr(err)
+        quiet.__enter__()
+        self.addCleanup(quiet.__exit__, None, None, None)
+
+    @staticmethod
+    def _remove_handlers(logger):
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
+
+    @staticmethod
+    def closed_port():
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        return port
+
+    def test_a_server_down_at_startup_is_waited_for(self):
+        port = self.closed_port()
+        args = argparse.Namespace(
+            syslog=("127.0.0.1", port), syslog_proto="tcp", syslog_facility="local0"
+        )
+        logger = smtp_sink.setup_syslog(args)  # used to raise ConnectionRefusedError
+        logger.info("lost")  # still down: a line on stderr, nothing raised
+        self.assertNotIn("Traceback", self.err.getvalue())
+        self.assertEqual(self.err.getvalue().count(f"syslog 127.0.0.1:{port}:"), 2)
+
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", port))
+        listener.listen(1)
+        listener.settimeout(REPLY_TIMEOUT)
+        logger.info("hello")
+        conn, _ = listener.accept()
+        self.addCleanup(conn.close)
+        conn.settimeout(REPLY_TIMEOUT)
+        self.assertIn(b"smtp_sink: hello", conn.recv(4096))
+
+    def test_a_failed_send_drops_the_socket_so_the_next_one_reconnects(self):
+        # Connected for real, then swapped for a socket that has failed. A
+        # refused connect would do as a start, but costs two seconds on Windows.
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        handler = smtp_sink.PatientSysLogHandler(
+            address=listener.getsockname(), socktype=socket.SOCK_STREAM
+        )
+        self.addCleanup(handler.close)
+        handler.socket.close()
+        dead = mock.Mock()
+        handler.socket = dead
+        try:
+            raise ConnectionResetError("the server went away")
+        except OSError:
+            handler.handleError(logging.makeLogRecord({"msg": "x"}))
+        dead.close.assert_called_once_with()
+        self.assertIsNone(handler.socket)
+        self.assertIn("the server went away", self.err.getvalue())
+        self.assertNotIn("Traceback", self.err.getvalue())
 
 
 class CommandLineTests(unittest.TestCase):

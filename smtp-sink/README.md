@@ -21,7 +21,7 @@ python smtp_sink.py --bind 192.168.1.50 --syslog 192.168.1.10 --syslog-body
 | `--bind ADDRESS` | Address to listen on. Required, with no default, so the sink never ends up on every interface by omission. Usually this machine's LAN address; `0.0.0.0` means every interface, for when that is really what you want. |
 | `--port PORT` | Port to listen on, 2525 by default. Port 25 needs root or `CAP_NET_BIND_SERVICE`. |
 | `--log PATH` | File to append messages to, `smtp_sink.log` by default. |
-| `--syslog HOST[:PORT]` | Also forward each message to this syslog server. Port 514 by default. An IPv6 address goes in brackets when it has a port, `[::1]:514`, and can go bare without one, `::1`. |
+| `--syslog HOST[:PORT]` | Also forward each message to this syslog server. Port 514 by default. An IPv6 address goes in brackets when it has a port, `[::1]:514`, and can go bare without one, `::1`. A server that is down, at startup or later, costs a line on stderr per message and is tried again with the next; it never stops the sink logging mail. |
 | `--syslog-proto udp\|tcp` | Transport for the above, `udp` by default. |
 | `--syslog-facility NAME` | Syslog facility, `local0` by default. |
 | `--syslog-body` | Put the message body in the syslog line as well as the summary. Base64 and quoted-printable are decoded, and a multipart message contributes its first text/plain part rather than its boundaries and attachments. |
@@ -88,5 +88,8 @@ if you would rather skip the shell.
 
 The tests bind only the loopback address on a port the operating system picks,
 so they need no network and no privileges, and they send mail nowhere. Nothing
-contacts a syslog server either: the module's logger is replaced with a mock,
-which is also how the case of no syslog being configured is covered.
+contacts a real syslog server either. Most tests replace the module's logger
+with a mock, which is also how the case of no syslog being configured is
+covered, and the tests for a server that is down open their own listener on
+the loopback address. They take about a second, or about five on Windows, where
+a refused loopback connection takes two seconds and those tests make two.
