@@ -23,6 +23,7 @@ import io
 import re
 import shutil
 import smtplib
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -345,6 +346,40 @@ class ForwardSyslogTests(unittest.TestCase):
         with mock.patch.object(smtp_sink, "syslog", None):
             smtp_sink.forward_syslog(("192.0.2.7", 1), "a", ["b"], "Subject: s\n\nx\n", False, 2000)
         self.logger.info.assert_not_called()
+
+
+class CommandLineTests(unittest.TestCase):
+    """The options `main` reads, without a server ever listening."""
+
+    def test_bind_has_to_be_given(self):
+        err = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["smtp_sink.py"]),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            asyncio.run(smtp_sink.main())
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--bind", err.getvalue())
+
+    def test_the_address_given_is_the_one_bound(self):
+        class Stop(Exception):
+            pass
+
+        seen = {}
+
+        async def start_server(handler, host, port):
+            seen.update(host=host, port=port)
+            raise Stop
+
+        argv = ["smtp_sink.py", "--bind", "192.0.2.10", "--port", "2600"]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(smtp_sink.asyncio, "start_server", start_server),
+            self.assertRaises(Stop),
+        ):
+            asyncio.run(smtp_sink.main())
+        self.assertEqual(seen, {"host": "192.0.2.10", "port": 2600})
 
 
 class ServerTests(unittest.IsolatedAsyncioTestCase):

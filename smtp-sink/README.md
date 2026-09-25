@@ -18,7 +18,7 @@ python smtp_sink.py --bind 192.168.1.50 --syslog 192.168.1.10 --syslog-body
 
 | Option | Effect |
 | --- | --- |
-| `--bind ADDRESS` | Address to listen on. `0.0.0.0` by default, which is every interface; naming the LAN address instead is the way to keep it off the others. |
+| `--bind ADDRESS` | Address to listen on. Required, with no default, so the sink never ends up on every interface by omission. Usually this machine's LAN address; `0.0.0.0` means every interface, for when that is really what you want. |
 | `--port PORT` | Port to listen on, 2525 by default. Port 25 needs root or `CAP_NET_BIND_SERVICE`. |
 | `--log PATH` | File to append messages to, `smtp_sink.log` by default. |
 | `--syslog HOST[:PORT]` | Also forward each message to this syslog server. Port 514 by default. |
@@ -60,10 +60,10 @@ the file, is written out as an escape like `\r` rather than passed through.
 There is no authentication and no rate limiting, and anything that connects
 gets its message logged. This is fine on a network you control and is an open
 relay-shaped hole on one you do not, so bind it to a LAN address and leave it
-off the public internet. A message larger than 10 MB, counted in octets as the
-`SIZE` the server advertises promises, is refused with a 552 and the
-connection carries on; a client that goes quiet for five minutes is hung up
-on.
+off the public internet. That is why `--bind` has to be given. A message larger
+than 10 MB, counted in octets as the `SIZE` the server advertises promises, is
+refused with a 552 and the connection carries on; a client that goes quiet for
+five minutes is hung up on.
 
 ## Tests
 

@@ -323,7 +323,12 @@ def setup_syslog(args):
 async def main():
     global syslog
     ap = argparse.ArgumentParser(description="LAN-only SMTP sink that logs mail to a file and syslog")
-    ap.add_argument("--bind", default="0.0.0.0", help="address to listen on (use your LAN IP to limit exposure)")
+    # No default. Anything that connects gets its message appended to a file,
+    # with no authentication and no rate limit, so an address that quietly
+    # meant every interface would put that on a public one too. A LAN address
+    # is the usual answer, and 0.0.0.0 is still there for anyone who says so.
+    ap.add_argument("--bind", required=True, metavar="ADDRESS",
+                    help="address to listen on, usually this machine's LAN address; 0.0.0.0 means every interface")
     ap.add_argument("--port", type=int, default=2525, help="port to listen on (25 needs root or CAP_NET_BIND_SERVICE)")
     ap.add_argument("--log", default="smtp_sink.log", help="file to append messages to")
     ap.add_argument("--syslog", metavar="HOST[:PORT]", help="forward each message to this syslog server (default port 514)")
