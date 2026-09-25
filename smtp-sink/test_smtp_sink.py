@@ -363,6 +363,33 @@ class ForwardSyslogTests(unittest.TestCase):
         self.logger.info.assert_not_called()
 
 
+class SyslogAddressTests(unittest.TestCase):
+    def test_reads_every_way_of_writing_one(self):
+        cases = {
+            "192.0.2.1": ("192.0.2.1", 514),
+            "192.0.2.1:1514": ("192.0.2.1", 1514),
+            "syslog.local": ("syslog.local", 514),
+            "syslog.local:1514": ("syslog.local", 1514),
+            # IPv6: bare means the default port, brackets allow one.
+            "::1": ("::1", 514),
+            "fe80::5": ("fe80::5", 514),
+            "[::1]": ("::1", 514),
+            "[::1]:1514": ("::1", 1514),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(smtp_sink.syslog_address(text), expected)
+
+    def test_refuses_what_is_not_an_address(self):
+        for text in ("host:abc", "host:0", "host:70000", "[::1", "[::1]x", ":514", "[]:514"):
+            with self.subTest(text=text), self.assertRaises(argparse.ArgumentTypeError):
+                smtp_sink.syslog_address(text)
+
+    def test_writes_one_back_out_the_way_it_is_given(self):
+        self.assertEqual(smtp_sink.shown_address(("192.0.2.1", 514)), "192.0.2.1:514")
+        self.assertEqual(smtp_sink.shown_address(("::1", 514)), "[::1]:514")
+
+
 class CommandLineTests(unittest.TestCase):
     """The options `main` reads, without a server ever listening."""
 
@@ -376,6 +403,18 @@ class CommandLineTests(unittest.TestCase):
             asyncio.run(smtp_sink.main())
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--bind", err.getvalue())
+
+    def test_a_syslog_address_that_is_not_one_is_refused_cleanly(self):
+        err = io.StringIO()
+        argv = ["smtp_sink.py", "--bind", "127.0.0.1", "--syslog", "host:abc"]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            asyncio.run(smtp_sink.main())
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--syslog", err.getvalue())
 
     def test_the_server_starts_on_the_address_given_with_the_line_limit(self):
         class Stop(Exception):

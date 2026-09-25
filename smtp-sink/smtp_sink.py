@@ -352,13 +352,43 @@ async def handle_client(reader, writer, args):
             pass
 
 
+def syslog_address(text):
+    """`--syslog` as a (host, port) pair, for argparse to call.
+
+    An IPv6 address is full of colons, so one with a port goes in brackets, as
+    in a URL: `[::1]:514`, or `[::1]` for the default port. A bare address with
+    more than one colon, such as `::1`, can only be IPv6 without a port, and is
+    taken that way. Anything else is `HOST` or `HOST:PORT`.
+    """
+    if text.startswith("["):
+        host, bracket, rest = text[1:].partition("]")
+        if not bracket or (rest and not rest.startswith(":")):
+            raise argparse.ArgumentTypeError(f"expected [HOST] or [HOST]:PORT, got {text!r}")
+        port = rest[1:]
+    elif text.count(":") > 1:
+        host, port = text, ""
+    else:
+        host, _, port = text.partition(":")
+    if not host:
+        raise argparse.ArgumentTypeError(f"no host in {text!r}")
+    if not port:
+        return host, 514
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise argparse.ArgumentTypeError(f"not a port number: {port!r}")
+    return host, int(port)
+
+
+def shown_address(address):
+    """A (host, port) pair written back out the way `--syslog` takes it."""
+    host, port = address
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
 def setup_syslog(args):
     """Build a logger that ships each record to the remote syslog server."""
-    host, _, port = args.syslog.partition(":")
-    port = int(port) if port else 514
     socktype = socket.SOCK_STREAM if args.syslog_proto == "tcp" else socket.SOCK_DGRAM
     handler = logging.handlers.SysLogHandler(
-        address=(host, port),
+        address=args.syslog,
         facility=args.syslog_facility,
         socktype=socktype,
     )
@@ -384,7 +414,8 @@ async def main():
                     help="address to listen on, usually this machine's LAN address; 0.0.0.0 means every interface")
     ap.add_argument("--port", type=int, default=2525, help="port to listen on (25 needs root or CAP_NET_BIND_SERVICE)")
     ap.add_argument("--log", default="smtp_sink.log", help="file to append messages to")
-    ap.add_argument("--syslog", metavar="HOST[:PORT]", help="forward each message to this syslog server (default port 514)")
+    ap.add_argument("--syslog", type=syslog_address, metavar="HOST[:PORT]",
+                    help="forward each message to this syslog server (default port 514); IPv6 as [::1]:514")
     ap.add_argument("--syslog-proto", choices=("udp", "tcp"), default="udp")
     ap.add_argument("--syslog-facility", default="local0", help="syslog facility name, e.g. local0, mail, user")
     ap.add_argument("--syslog-body", action="store_true", help="include the message body in the syslog line, not just the summary")
@@ -399,7 +430,7 @@ async def main():
         limit=LINE_LIMIT,
     )
     print(f"SMTP sink listening on {args.bind}:{args.port}, logging to {args.log}"
-          + (f", forwarding to syslog {args.syslog} ({args.syslog_proto})" if args.syslog else ""))
+          + (f", forwarding to syslog {shown_address(args.syslog)} ({args.syslog_proto})" if args.syslog else ""))
     async with server:
         await server.serve_forever()
 

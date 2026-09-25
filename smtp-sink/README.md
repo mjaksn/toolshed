@@ -21,7 +21,7 @@ python smtp_sink.py --bind 192.168.1.50 --syslog 192.168.1.10 --syslog-body
 | `--bind ADDRESS` | Address to listen on. Required, with no default, so the sink never ends up on every interface by omission. Usually this machine's LAN address; `0.0.0.0` means every interface, for when that is really what you want. |
 | `--port PORT` | Port to listen on, 2525 by default. Port 25 needs root or `CAP_NET_BIND_SERVICE`. |
 | `--log PATH` | File to append messages to, `smtp_sink.log` by default. |
-| `--syslog HOST[:PORT]` | Also forward each message to this syslog server. Port 514 by default. |
+| `--syslog HOST[:PORT]` | Also forward each message to this syslog server. Port 514 by default. An IPv6 address goes in brackets when it has a port, `[::1]:514`, and can go bare without one, `::1`. |
 | `--syslog-proto udp\|tcp` | Transport for the above, `udp` by default. |
 | `--syslog-facility NAME` | Syslog facility, `local0` by default. |
 | `--syslog-body` | Put the message body in the syslog line as well as the summary. Base64 and quoted-printable are decoded, and a multipart message contributes its first text/plain part rather than its boundaries and attachments. |
