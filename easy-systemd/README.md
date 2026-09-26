@@ -50,7 +50,7 @@ printed, along with the commands for checking on the service.
 Running `install.sh` again with the same NAME replaces that service with the
 new settings and restarts it. It refuses a NAME already taken by a unit it did
 not create, including the ones the system ships, so it cannot quietly replace
-`ssh` or `cron`.
+`ssh` or `cron`, and it refuses to write through a symbolic link.
 
 The chosen user needs to be able to enter the working directory. Installing
 from inside your home directory as another user, or as yourself from a

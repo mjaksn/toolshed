@@ -120,7 +120,10 @@ done
 
 unit=$name.service
 path=$UNIT_DIR/$unit
-if [[ -e $path || -L $path ]]; then
+if [[ -L $path ]]; then
+    # install.sh never makes one, and writing through it would land elsewhere.
+    die "$path is a symbolic link, which install.sh never makes; leaving it alone"
+elif [[ -e $path ]]; then
     [[ -f $path && $(head -n1 -- "$path" 2>/dev/null) == "$MARKER" ]] \
         || die "$path exists and was not created by install.sh; leaving it alone"
 elif systemctl cat -- "$unit" >/dev/null 2>&1; then

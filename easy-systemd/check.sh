@@ -134,6 +134,12 @@ expect "and leaves that unit as it was" grep -qx 'ExecStart=/bin/true' "$(unit_f
 printf '[Service]\n%s\nExecStart=/bin/true\n' "$marker" >"$(unit_file es-check-late)"
 refuses "a unit with the marker below the first line" "was not created by install.sh" \
     run_install es-check-late -- sleep 1
+# A link to a file that looks like one of its own, which it must not write
+# through.
+echo "$marker" >"$tmp/elsewhere.service"
+ln -s "$tmp/elsewhere.service" "$(unit_file es-check-link)"
+refuses "a symbolic link" "is a symbolic link" run_install es-check-link -- sleep 1
+expect "and leaves what it points to as it was" test "$(wc -l <"$tmp/elsewhere.service")" -eq 1
 expect "nothing was installed by any of these" test ! -e "$(unit_file es-check-x)"
 
 echo "Installing"
@@ -188,6 +194,8 @@ expect "a bare run lists what install.sh created" lists es-check-sleep
 expect "and not what it did not" eval '! lists es-check-foreign'
 expect "nor a unit with the marker further down" eval '! lists es-check-late'
 refuses "that unit by name" "was not created by install.sh" run_uninstall es-check-late
+expect "nor a symbolic link to one" eval '! lists es-check-link'
+refuses "that link by name" "was not created by install.sh" run_uninstall es-check-link
 refuses "a name that is not installed" "no such unit" run_uninstall es-check-none
 refuses "a list holding one foreign unit" "was not created by install.sh" \
     run_uninstall es-check-args es-check-foreign
@@ -202,7 +210,7 @@ if [[ ${#existing[@]} -eq 0 ]]; then
     run_uninstall --all
     expect "--all removes every unit install.sh created" gone es-check-env
     expect "all of them" gone es-check-restart
-    expect "and leaves the foreign ones" test -e "$(unit_file es-check-foreign)" -a -e "$(unit_file es-check-late)"
+    expect "and leaves the foreign ones" test -e "$(unit_file es-check-foreign)" -a -e "$(unit_file es-check-late)" -a -L "$(unit_file es-check-link)"
 else
     echo "skip  --all, since install.sh has units of its own here: ${existing[*]}"
 fi
