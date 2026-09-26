@@ -20,6 +20,10 @@ a repository of its own goes in here.
 - [dispatch-desk](dispatch-desk/), a PowerShell module that creates Windows
   desktop shortcuts, each one dispatching a GitHub Actions workflow and then
   watching the run through to its conclusion.
+- [easy-systemd](easy-systemd/), a pair of bash scripts: one installs any
+  command line as a systemd service that starts at boot and is restarted when
+  it stops, and the other removes the services the first created and nothing
+  else.
 - [EdfiScripts](EdfiScripts/), simple batch scripts providing basic automation of
   common tasks when doing local Ed-Fi ODS platform development, and very possibly
   outdated now.
@@ -109,7 +113,7 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Ten tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
+Eleven tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
 from the gallery and verified against a recorded hash rather than installed, so
 what the check ran against is the same module every time. That is the same
 arrangement the tool already uses for powershell-yaml at run time, and for the
@@ -122,9 +126,11 @@ install first. `WinEvents` installs its test dependencies, pinned by version and
 hash, and runs `pytest`. `lock-hashes`, `ha-rest-yaml` and `smtp-sink` run
 their own tests under `unittest`, with nothing to install; the last of those
 starts the real server on the loopback address and speaks SMTP to it, so it
-needs no network and no privileges. Those last five each keep the command in a
-`check.sh` beside its `ci.json`, so the check CI runs is one a person can run
-too.
+needs no network and no privileges. `easy-systemd` is the exception to that:
+it installs, restarts and removes real services on the runner's own systemd
+and checks what each one ends up running, so it needs root, which it takes
+with `sudo`. Those last six each keep the command in a `check.sh` beside its
+`ci.json`, so the check CI runs is one a person can run too.
 
 ## Licence
 
