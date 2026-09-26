@@ -430,10 +430,27 @@ def clean(text):
     return raw.decode("utf-8", "replace")
 
 
+def header_value(value):
+    """One header's value, as `raw_items` gives it, as readable text.
+
+    From `raw_items` rather than `get`, because for a header holding raw 8-bit
+    text `get` hands back an unknown-8bit Header whose text has every high
+    byte replaced already, valid UTF-8 included. The raw value still holds the
+    bytes, as surrogates, and `clean` reads them as UTF-8, which is what a
+    device sending raw 8-bit nearly always means, replacing only what is not.
+    Such a value has no encoded words to decode: those are ASCII by definition.
+    """
+    if any("\udc80" <= c <= "\udcff" for c in value):
+        return clean(value)
+    return clean(header_text(value))
+
+
 def decoded_header(msg, name):
     """One header as readable text, or None if the message has none."""
-    value = msg.get(name)
-    return None if value is None else clean(header_text(str(value)))
+    for key, value in msg.raw_items():
+        if key.lower() == name.lower():
+            return header_value(value)
+    return None
 
 
 def content_parts(msg):
@@ -562,8 +579,8 @@ def webhook_payload(delivery):
             "message_id": decoded_header(msg, "Message-ID"),
             "content_type": msg.get_content_type(),
             "headers": [
-                {"name": clean(name), "value": clean(header_text(str(value)))}
-                for name, value in msg.items()
+                {"name": clean(name), "value": header_value(value)}
+                for name, value in msg.raw_items()
             ],
             "text": first_text(msg, "text/plain"),
             "html": first_text(msg, "text/html"),

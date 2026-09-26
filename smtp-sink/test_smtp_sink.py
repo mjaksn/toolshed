@@ -1334,6 +1334,15 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual(message["subject"], "caf� �")
         self.assertEqual(message["headers"][1]["value"], "�")
 
+    def test_raw_utf_8_in_a_header_survives(self):
+        # Sent as raw 8-bit rather than as encoded words. Only the byte that
+        # is not UTF-8 is replaced; the rest reads as it was meant.
+        body = "Subject: café 15°C \udcff\r\nX-Site: München\r\n\r\nbody\r\n".encode(
+            "utf-8", "surrogateescape")
+        message = smtp_sink.webhook_payload(delivery(body))["message"]
+        self.assertEqual(message["subject"], "café 15°C �")
+        self.assertEqual(message["headers"][1], {"name": "X-Site", "value": "München"})
+
     def test_an_escaped_address_stays_escaped(self):
         payload = smtp_sink.webhook_payload(delivery(mail_from="<a\\r@example.test>"))
         self.assertEqual(payload["envelope"]["from"], "<a\\r@example.test>")

@@ -138,10 +138,11 @@ shortened:
 | `message.attachments` | Each part marked as an attachment, carrying a filename whatever its disposition, or holding a message of its own, such as an email forwarded as an attachment: its name, content type, disposition, and size in octets once decoded. An attached message is one entry, not walked into, and its size is that of the message written out again, which can differ a little from what arrived, for instance in line endings; a size that cannot be worked out is null. The content itself is in `raw`. |
 | `message.raw` | The whole message exactly as received, in base64. It is the one field that loses nothing, since JSON cannot carry arbitrary bytes. |
 
-A header sent as raw 8-bit text rather than as encoded words cannot be
-decoded without knowing its charset, so bytes that are not UTF-8 arrive as
-U+FFFD replacement characters there, and are intact in `raw`. The JSON is
-ASCII throughout, anything else written as a `\u` escape.
+A header sent as raw 8-bit text rather than as encoded words names no
+charset, so it is read as UTF-8, which is what a device sending one nearly
+always means. Any bytes in it that are not UTF-8 arrive as U+FFFD replacement
+characters there, and are intact in `raw`. The JSON is ASCII throughout,
+anything else written as a `\u` escape.
 
 Sending never holds up the mail. A message is queued for the webhook in the
 same step that writes it to the file, and the request is made later from a
