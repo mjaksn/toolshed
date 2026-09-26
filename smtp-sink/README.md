@@ -250,5 +250,5 @@ open their own listener on the loopback address, except the one for a server
 that never answers, which fakes the connect timing out. The webhook tests run
 a small HTTP server of their own on the loopback address, which records each
 request and can be told to answer with an error, a redirect, or not at all.
-They take a couple of seconds, or about six on Windows, where a refused
+They take a couple of seconds, or about seven on Windows, where a refused
 loopback connection takes two seconds and the syslog tests make two.

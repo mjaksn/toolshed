@@ -92,7 +92,7 @@ unittest suite with nothing to install, `cd ha-rest-yaml && bash
 tests bind the loopback address on a port the operating system picks, the
 syslog tests replace the logger or the connect with a mock, or open their own
 loopback listener, and the webhook tests run a small HTTP server of their own
-on the loopback address. They take about two seconds, or about six on
+on the loopback address. They take about two seconds, or about seven on
 Windows, where each of the two refused loopback connections in the syslog
 tests costs two seconds.
 Every one of these was run in this checkout and passes.
