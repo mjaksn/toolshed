@@ -26,6 +26,7 @@ import argparse
 import asyncio
 import base64
 import contextlib
+import email.message
 import http.client
 import http.server
 import io
@@ -1430,6 +1431,26 @@ class WebhookPayloadTests(unittest.TestCase):
 
     def test_a_charset_name_that_is_not_ascii_leaves_the_header_as_it_came(self):
         self.assertEqual(smtp_sink.header_text("=?utf-�?q?a?="), "=?utf-�?q?a?=")
+
+    def test_parameter_headers_are_cut_before_they_are_split(self):
+        # Splitting into parameters is quadratic, and the parser does it for
+        # every multipart boundary: a message-sized Content-Type of them held
+        # the thread for a quarter of an hour.
+        params = ";a=b" * 100_000
+        body = (
+            f"Content-Type: multipart/mixed; boundary=B{params}\r\n\r\n"
+            "--B\r\nContent-Type: text/plain; charset=utf-8\r\n"
+            f'Content-Disposition: attachment; filename="notes.txt"{params}\r\n\r\nx\r\n'
+            "--B--\r\n"
+        ).encode("ascii")
+        with mock.patch("email.message._parseparam", wraps=email.message._parseparam) as split:
+            message = smtp_sink.webhook_payload(delivery(body))["message"]
+            smtp_sink.syslog_line(("p", 1), "a", ["b"], body, True, 2000)
+        self.assertTrue(split.called)
+        self.assertLessEqual(max(len(call.args[0]) for call in split.call_args_list),
+                             smtp_sink.MAX_HEADER_TEXT)
+        self.assertEqual(message["content_type"], "multipart/mixed")
+        self.assertEqual(message["attachments"][0]["filename"], "notes.txt")
 
     def test_a_huge_header_is_cut_before_it_is_decoded(self):
         # Decoding is quadratic in the length: a message-sized header of

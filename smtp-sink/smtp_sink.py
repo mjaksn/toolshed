@@ -33,6 +33,7 @@ import urllib.parse
 import uuid
 from email.errors import CharsetError, HeaderParseError
 from email.header import decode_header, make_header
+from email.message import Message
 from email.parser import BytesParser
 
 HOSTNAME = socket.gethostname()
@@ -112,6 +113,9 @@ WEBHOOK_QUEUE_BYTES = 64 * 1024 * 1024
 # all rather than hours. A real header is far shorter, and what is cut off is
 # still in the log file and in the webhook's `raw`.
 MAX_HEADER_TEXT = 4096
+
+# The headers the email package splits into parameters; see BoundedMessage.
+PARAM_HEADERS = {"content-type", "content-disposition"}
 
 # A stretch of a header that is not ASCII, captured so that splitting on it
 # keeps it; see header_value.
@@ -357,6 +361,30 @@ def header_text(value):
     return text + "..." if cut else text
 
 
+class BoundedMessage(Message):
+    """A Message whose parameter headers are read no longer than MAX_HEADER_TEXT.
+
+    The email package reads a boundary, a charset or a filename by splitting
+    Content-Type or Content-Disposition into parameters, and the way it splits
+    takes time that grows with the square of the length. The parser itself
+    does it for the boundary of every multipart part, so a 10 MB Content-Type
+    of parameters held the thread parsing it for a quarter of an hour. Both
+    headers are read through `get`, so cutting them here bounds all of that. A
+    real one is a few dozen characters, and the header is whole in `raw`.
+    """
+
+    def get(self, name, failobj=None):
+        value = super().get(name, failobj)
+        if name.lower() in PARAM_HEADERS and isinstance(value, str) and len(value) > MAX_HEADER_TEXT:
+            return value[:MAX_HEADER_TEXT]
+        return value
+
+
+def parse_message(body):
+    """`body` parsed into BoundedMessage parts, for syslog and the webhook."""
+    return BytesParser(_class=BoundedMessage).parsebytes(body)
+
+
 def part_text(part):
     """One non-multipart part as text, undoing base64 or quoted-printable."""
     payload = part.get_payload(decode=True)
@@ -392,7 +420,7 @@ def message_text(msg):
 
 def syslog_line(peer, mail_from, rcpts, body, include_body, max_len):
     """The one line a message becomes in syslog, no longer than `max_len`."""
-    msg = BytesParser().parsebytes(body)
+    msg = parse_message(body)
     raw_subject = msg.get("Subject")
     subject = "(no subject)" if raw_subject is None else header_text(str(raw_subject))
     # A raw 8-bit subject, one sent without encoded words, comes back out of
@@ -636,7 +664,7 @@ def webhook_payload(delivery):
     is the only field here that loses nothing.
     """
     body = delivery.body
-    msg = BytesParser().parsebytes(body)
+    msg = parse_message(body)
     return {
         "id": str(uuid.uuid4()),
         "received": delivery.received,

@@ -179,6 +179,13 @@ other header. Any bytes in it that are not UTF-8 arrive as U+FFFD replacement
 characters there, and are intact in `raw`. The JSON is ASCII throughout,
 anything else written as a `\u` escape.
 
+A part's content type, charset and filename are read from no more than the
+first 4096 characters of its `Content-Type` and `Content-Disposition`, for the
+syslog line as well as the webhook. Splitting those headers into parameters
+takes time that grows with the square of their length, and the parser does it
+for every multipart boundary, so without the limit one message could hold the
+thread parsing it for minutes. A real one is a few dozen characters.
+
 Sending never holds up the mail. A message is queued for the webhook in the
 same step that writes it to the file, and the request is made later from a
 thread of its own, so the client's 250 never waits on the webhook, and a
