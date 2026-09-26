@@ -1305,9 +1305,18 @@ class WebhookOptionTests(unittest.TestCase):
     def test_refuses_what_it_cannot_send_to(self):
         for url in ("ftp://example.test/", "hooks.example.test/path", "http://",
                     "http://user:pw@example.test/", "http://example.test:0/",
-                    "http://example.test:99999/", "http://example.test:port/"):
+                    "http://example.test:99999/", "http://example.test:port/",
+                    "http://[::1/x"):
             with self.subTest(url=url), self.assertRaises(argparse.ArgumentTypeError):
                 smtp_sink.webhook_url(url)
+
+    def test_a_refusal_does_not_print_the_url(self):
+        for url in ("ftp://example.test/s3cret", "http:///s3cret", "http://example.test:0/s3cret",
+                    "http://u:s3cret@example.test/", "http://[::1/s3cret"):
+            with self.subTest(url=url):
+                with self.assertRaises(argparse.ArgumentTypeError) as refused:
+                    smtp_sink.webhook_url(url)
+                self.assertNotIn("s3cret", str(refused.exception))
 
     def test_reads_a_header(self):
         self.assertEqual(smtp_sink.header_pair("X-API-Key: abc"), ("X-API-Key", "abc"))

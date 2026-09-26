@@ -920,12 +920,20 @@ def webhook_url(text):
     Everything wrong with it is caught here rather than on the first message,
     because by then it is a line on stderr per message and a sink that looks
     as if it is working.
+
+    No refusal repeats the URL or any part of it, because plenty of webhook
+    URLs carry their secret in the path, and stderr at startup goes to the same
+    journal as everything else. A ValueError from the parser is turned into a
+    refusal here for the same reason: argparse would print the argument with it.
     """
-    parts = urllib.parse.urlsplit(text)
+    try:
+        parts = urllib.parse.urlsplit(text)
+    except ValueError:  # an unbalanced bracket around an IPv6 host, say
+        raise argparse.ArgumentTypeError("the webhook URL could not be read as a URL") from None
     if parts.scheme.lower() not in ("http", "https"):
-        raise argparse.ArgumentTypeError(f"expected an http or https URL, got {text!r}")
+        raise argparse.ArgumentTypeError("the webhook URL has to start with http:// or https://")
     if not parts.hostname:
-        raise argparse.ArgumentTypeError(f"no host in {text!r}")
+        raise argparse.ArgumentTypeError("the webhook URL has no host")
     if parts.username is not None or parts.password is not None:
         # http.client would drop them without a word. Said this way, the
         # credentials go where they can be sent.
@@ -937,7 +945,7 @@ def webhook_url(text):
     except ValueError:  # out of range, or not a number
         port = 0
     if port == 0:
-        raise argparse.ArgumentTypeError(f"not a port number in {text!r}")
+        raise argparse.ArgumentTypeError("the port in the webhook URL is not a number from 1 to 65535")
     return text
 
 

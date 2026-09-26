@@ -160,10 +160,11 @@ A request that fails, whether it cannot connect, times out, or is answered
 with anything but a 2xx status, costs one line on stderr, and the message is
 not sent again. A redirect is not followed and counts as a failure, which
 says what the URL should have been. Proxy settings in the environment are
-ignored, so the request goes where `--webhook-url` says. Once the sink is
-running, the URL it prints, at startup and on stderr, is cut to its scheme,
-host and port, since plenty of webhook URLs carry their secret in the path. A
-header value is never printed, not even in the error for one that is refused.
+ignored, so the request goes where `--webhook-url` says. The URL the sink
+prints, at startup and on stderr, is cut to its scheme, host and port, since
+plenty of webhook URLs carry their secret in the path, and a URL refused at
+startup is not printed at all. Nor is a header value, even in the error for
+one that is refused.
 
 ## A warning about where you point it
 
