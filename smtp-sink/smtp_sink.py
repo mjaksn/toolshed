@@ -110,13 +110,31 @@ COMPUTED_HEADERS = {"content-length", "transfer-encoding"}
 WEBHOOK_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 
 # Held while a message is appended. The writes run in worker threads, off the
-# event loop, and two messages finishing together must not interleave.
-log_lock = threading.Lock()
+# event loop, and two messages finishing together must not interleave. It is
+# also held while the message is queued for the webhook, so the queue's order
+# is the file's; reentrant, because `log_message` holds it around a
+# `write_entry` that takes it too.
+log_lock = threading.RLock()
 
 syslog = None  # logging.Logger, set up in main() if --syslog is given
 forwards = None  # asyncio.Queue of syslog lines, set up by start_forwarder()
 forwarder = None  # the asyncio.Task draining it
 webhook = None  # WebhookSender, set up in main() if --webhook-url is given
+
+
+def log_message(log_path, peer, mail_from, rcpts, body, received, delivery=None):
+    """Append one message to the log, then queue `delivery` for the webhook.
+
+    Both happen under `log_lock`, which is what makes the webhook's order the
+    log file's. Queued anywhere later, a message logged first could still be
+    queued second, by a client that took longer over its 250 or its syslog
+    line. Returns whether the webhook took it, or None with no webhook.
+    """
+    with log_lock:
+        write_entry(log_path, peer, mail_from, rcpts, body, received)
+        if delivery is None or webhook is None:
+            return None
+        return webhook.submit(delivery)
 
 
 def timestamp():
@@ -823,11 +841,18 @@ async def handle_client(reader, writer, args):
                     # undone and nothing else touched, a bare LF included.
                     body = b"".join(chunks)
                     received = timestamp()
+                    # Queued for the webhook as it is logged, never waited on:
+                    # the sender thread builds the JSON and makes the request,
+                    # so a webhook that is slow or down never holds up this
+                    # connection or any other.
+                    delivery = None
+                    if webhook is not None:
+                        delivery = Delivery(received, peer, helo, mail_from, rcpts, body)
                     try:
                         # In a thread: up to the size limit in one write would
                         # otherwise stall every other client on the loop.
-                        await asyncio.to_thread(
-                            write_entry, args.log, peer, mail_from, rcpts, body, received
+                        queued = await asyncio.to_thread(
+                            log_message, args.log, peer, mail_from, rcpts, body, received, delivery
                         )
                     except OSError as exc:
                         # A full disk or a file that cannot be opened is a
@@ -855,10 +880,10 @@ async def handle_client(reader, writer, args):
                         # limit. The wait is CPU time bounded by the size
                         # limit and comes after the 250, so it never depends
                         # on the syslog server and never lasts long enough for
-                        # the client to send the message again. The webhook,
-                        # below, bounds the same thing differently: its queue
-                        # is capped in bytes, so its parse need not be waited
-                        # for here.
+                        # the client to send the message again. The webhook
+                        # bounds the same thing differently: its queue is
+                        # capped in bytes, so its parse need not be waited for
+                        # here, and it was queued as the message was logged.
                         # A message that cannot be summarised costs its forward,
                         # never the connection the client already heard 250 on.
                         try:
@@ -875,14 +900,9 @@ async def handle_client(reader, writer, args):
                             except asyncio.QueueFull:
                                 print(f"[{peer[0]}] syslog queue full, not forwarded;"
                                       " the message is in the log file", file=sys.stderr)
-                    if webhook is not None:
-                        # Queued and left: the sender thread builds the JSON
-                        # and makes the request, so a webhook that is slow or
-                        # down never holds up this connection or any other.
-                        delivery = Delivery(received, peer, helo, mail_from, rcpts, body)
-                        if not webhook.submit(delivery):
-                            print(f"[{peer[0]}] webhook queue full, not sent;"
-                                  " the message is in the log file", file=sys.stderr)
+                    if queued is False:
+                        print(f"[{peer[0]}] webhook queue full, not sent;"
+                              " the message is in the log file", file=sys.stderr)
                 mail_from, rcpts = None, []
             elif verb == "RSET":
                 mail_from, rcpts = None, []

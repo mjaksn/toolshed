@@ -1098,6 +1098,29 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         subjects = [json.loads(r.body)["message"]["subject"] for r in hook.requests]
         self.assertEqual(subjects, ["first", "second", "third"])
 
+    async def test_a_message_is_queued_for_the_webhook_while_the_log_is_locked(self):
+        # What keeps the webhook's order the file's: queued any later, a
+        # message logged first could be queued second by a slower client.
+        seen = {}
+
+        def submit(delivery):
+            def probe():
+                seen["free"] = smtp_sink.log_lock.acquire(blocking=False)
+                if seen["free"]:
+                    smtp_sink.log_lock.release()
+
+            other = threading.Thread(target=probe)
+            other.start()
+            other.join(REPLY_TIMEOUT)
+            seen["logged"] = b"Subject: s\r\n" in self.log.read_bytes()
+            return True
+
+        with mock.patch.object(smtp_sink, "webhook", mock.Mock(submit=submit)):
+            reader, writer = await self.connect()
+            reply = await self.send_message(reader, writer, "Subject: s\r\n\r\nbody")
+        self.assertTrue(reply[0].startswith("250"), reply)
+        self.assertEqual(seen, {"free": False, "logged": True})
+
     async def test_a_full_webhook_queue_costs_the_send_not_the_message(self):
         sender = smtp_sink.WebhookSender("http://192.0.2.1/")  # never started
         err = io.StringIO()

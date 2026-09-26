@@ -88,7 +88,7 @@ installs the pinned test dependencies and runs pytest; the second is Windows
 only, because pywin32 is. `cd lock-hashes && bash ./check.sh` runs its
 unittest suite with nothing to install, `cd ha-rest-yaml && bash
 ./check.sh` does the same for that tool's 4 tests, and `cd smtp-sink && bash
-./check.sh` does it for that tool's 110, which need no network: the server
+./check.sh` does it for that tool's 111, which need no network: the server
 tests bind the loopback address on a port the operating system picks, the
 syslog tests replace the logger or the connect with a mock, or open their own
 loopback listener, and the webhook tests run a small HTTP server of their own
