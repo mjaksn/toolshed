@@ -31,7 +31,7 @@ import sys
 import threading
 import urllib.parse
 import uuid
-from email.errors import HeaderParseError
+from email.errors import CharsetError, HeaderParseError
 from email.header import decode_header, make_header
 from email.parser import BytesParser
 
@@ -339,7 +339,9 @@ def header_text(value):
         value = value[:MAX_HEADER_TEXT]
     try:
         text = str(make_header(decode_header(value)))
-    except (HeaderParseError, LookupError, UnicodeDecodeError, ValueError):
+    # CharsetError is a charset name that is not ASCII, which an encoded word
+    # can only carry once 8-bit bytes have been read into it.
+    except (CharsetError, HeaderParseError, LookupError, UnicodeDecodeError, ValueError):
         text = value
     return text + "..." if cut else text
 
@@ -352,9 +354,10 @@ def part_text(part):
     charset = part.get_content_charset() or "utf-8"
     try:
         return payload.decode(charset, "replace")
-    # A charset name Python does not know, or a codec such as idna that
-    # refuses the "replace" error handler outright.
-    except (LookupError, UnicodeError):
+    # A charset name Python does not know, a codec such as idna that refuses
+    # the "replace" error handler outright, or a name with a NUL in it, which
+    # the codec lookup refuses as a ValueError.
+    except (LookupError, UnicodeError, ValueError):
         return payload.decode("utf-8", "replace")
 
 
@@ -540,7 +543,9 @@ def part_size(part):
     if part.is_multipart():
         try:
             return sum(len(inner.as_bytes()) for inner in part.get_payload())
-        except (LookupError, UnicodeError, ValueError, TypeError):
+        # RecursionError: the generator writes nested messages out recursively,
+        # and one attached inside another a few hundred deep runs out of stack.
+        except (LookupError, RecursionError, UnicodeError, ValueError, TypeError):
             return None
     payload = part.get_payload(decode=True)
     return len(payload) if isinstance(payload, bytes) else None
