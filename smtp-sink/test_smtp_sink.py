@@ -1079,6 +1079,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         webhook = mock.Mock(submit=lambda delivery: queued.append(delivery) or True)
         with mock.patch.object(smtp_sink, "webhook", webhook):
             reader, writer = await self.connect()
+            await self.command(reader, writer, "EHLO first.example.test")
+            # A second greeting starts the session over, name included.
             await self.command(reader, writer, "HELO old.example.test")
             await self.command(reader, writer, "MAIL FROM:<a@example.test>")
             await self.command(reader, writer, "RCPT TO:<b@example.test>")
@@ -1109,6 +1111,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         name = "ups\x1b[2J" + "x" * 300
         with mock.patch.object(smtp_sink, "webhook", webhook):
             reader, writer = await self.connect()
+            # Replaced by the EHLO after it, as a second greeting should be.
+            await self.command(reader, writer, "HELO first.example.test")
             await self.command(reader, writer, f"EHLO {name}")
             await self.command(reader, writer, "RSET")
             await self.command(reader, writer, "MAIL FROM:<a@example.test>")
@@ -1896,6 +1900,17 @@ class WebhookSenderTests(unittest.TestCase):
         self.assertEqual(len(hook.requests), 1)
         self.assertIn("timed out", self.err.getvalue())
         self.assertIn("failed, not sent", self.err.getvalue())
+
+    def test_the_reply_is_read_only_so_far(self):
+        # Nothing in it is used, so a webhook answering with gigabytes must
+        # not get them all held in memory.
+        sender = smtp_sink.WebhookSender("http://hooks.example.test/x")
+        answer = mock.Mock(status=204, reason="No Content")
+        answer.read.return_value = b""
+        with mock.patch.object(http.client, "HTTPConnection") as connection:
+            connection.return_value.getresponse.return_value = answer
+            sender.deliver(delivery())
+        answer.read.assert_called_once_with(64 * 1024)
 
     def test_a_2xx_is_a_success_even_if_its_body_cannot_be_read(self):
         sender = smtp_sink.WebhookSender("http://hooks.example.test/x")
