@@ -30,7 +30,7 @@ python smtp_sink.py --bind 192.168.1.50 --webhook-url https://hooks.example.test
 | `--syslog-facility NAME` | Syslog facility, `local0` by default. |
 | `--syslog-body` | Put the message body in the syslog line as well as the summary. Base64 and quoted-printable are decoded, and a multipart message contributes its first text/plain part rather than its boundaries and attachments. |
 | `--syslog-max N` | Truncate syslog lines to N characters, 2000 by default. A line over the limit ends in an ellipsis, unless N leaves no room for one, in which case it is simply cut to N. A cut through the subject or body puts a closing quote after the ellipsis, so the field still ends where a parser expects. |
-| `--webhook-url URL` | Also send each message to this URL, as the JSON object described below. `http` and `https` both work. The only option the webhook needs; the three below all require it, and are refused without it. A URL that is not http or https, has no host, has a bad port, carries a user name and password, or holds a space, a control character or anything outside ASCII is refused at startup; percent-encode those instead. Credentials go in a header instead. |
+| `--webhook-url URL` | Also send each message to this URL, as the JSON object described below. `http` and `https` both work. The only option the webhook needs; the three below all require it, and are refused without it. A URL that is not http or https, has no host, has a bad port, carries a user name or password, or holds a space, a control character or anything outside ASCII is refused at startup; percent-encode those instead. Credentials go in a header instead. |
 | `--webhook-method METHOD` | `POST` by default, or `GET`, `PUT`, `PATCH` or `DELETE`, in either case. Every one but `GET` carries the JSON body; `GET` sends the request with no body at all, as a bare notification. |
 | `--webhook-disable-ssl-verify` | Accept any certificate from an `https` URL, including a self-signed one or one for another name. Without it, the certificate is checked against the system's trusted roots and the host name, and a request that fails the check is not sent. |
 | `--header "NAME: VALUE"` | Add this header to every webhook request. Give it once per header; a name given more than once is sent more than once. A header given here replaces the sink's own `User-Agent` or `Content-Type`. `Content-Length` and `Transfer-Encoding` are worked out from the body and cannot be given, and a value with a line break or a character outside Latin-1 is refused at startup. |
@@ -94,12 +94,20 @@ shortened:
   "id": "6003a91b-42f4-4d3b-83ac-8df9f85a1b77",
   "received": "2026-09-26T01:09:03-05:00",
   "sink": "mailhost",
-  "peer": {"address": "192.168.1.20", "port": 35140},
+  "peer": {
+    "address": "192.168.1.20",
+    "port": 35140
+  },
   "helo": "ups.lan",
-  "envelope": {"from": "<ups@nas.test>", "to": ["<ops@lan.test>"]},
+  "envelope": {
+    "from": "<ups@nas.test>",
+    "to": [
+      "<ops@lan.test>"
+    ]
+  },
   "message": {
-    "size": 323,
-    "subject": "UPS on battery, 15°C",
+    "size": 381,
+    "subject": "UPS on battery, 15\u00b0C",
     "from": "UPS <ups@nas.test>",
     "to": "ops@lan.test",
     "cc": null,
@@ -108,16 +116,42 @@ shortened:
     "message_id": "<1@nas.test>",
     "content_type": "multipart/mixed",
     "headers": [
-      {"name": "Subject", "value": "UPS on battery, 15°C"},
-      {"name": "From", "value": "UPS <ups@nas.test>"}
+      {
+        "name": "From",
+        "value": "UPS <ups@nas.test>"
+      },
+      {
+        "name": "To",
+        "value": "ops@lan.test"
+      },
+      {
+        "name": "Subject",
+        "value": "UPS on battery, 15\u00b0C"
+      },
+      {
+        "name": "Date",
+        "value": "Sat, 26 Sep 2026 01:09:03 -0500"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<1@nas.test>"
+      },
+      {
+        "name": "Content-Type",
+        "value": "multipart/mixed; boundary=\"B\""
+      }
     ],
     "text": "On battery.",
     "html": null,
     "attachments": [
-      {"filename": "report.pdf", "content_type": "application/pdf",
-       "disposition": "attachment", "size": 48213}
+      {
+        "filename": "load.csv",
+        "content_type": "text/csv",
+        "disposition": "attachment",
+        "size": 19
+      }
     ],
-    "raw": "U3ViamVjdDogPT91dGYt..."
+    "raw": "RnJvbTogVVBTIDx1cHNA..."
   }
 }
 ```
@@ -161,8 +195,10 @@ line on stderr.
 
 A request that fails, whether it cannot connect, times out, or is answered
 with anything but a 2xx status, costs one line on stderr, and the message is
-not sent again. A redirect is not followed and counts as a failure, which
-says what the URL should have been. Proxy settings in the environment are
+not sent again. A redirect is not followed and counts as a failure, so a
+webhook that has moved shows up as a 301, 302, 307 or 308 on stderr; the new
+location is not printed, since it could carry a secret as the URL can. Proxy
+settings in the environment are
 ignored, so the request goes where `--webhook-url` says. The URL the sink
 prints, at startup and on stderr, is cut to its scheme, host and port, since
 plenty of webhook URLs carry their secret in the path, and a URL refused at
