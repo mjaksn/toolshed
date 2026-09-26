@@ -42,8 +42,9 @@ a repository of its own goes in here.
   keeps the encoding and byte order mark it found.
 - [smtp-sink](smtp-sink/), a Python script that runs an SMTP server on a LAN
   which accepts mail and never delivers it, appending each message to a log
-  file and optionally forwarding a summary to syslog, for the devices that can
-  only report by sending mail. Standard library only.
+  file and optionally forwarding a summary to syslog and the whole message, as
+  JSON, to a webhook, for the devices that can only report by sending mail.
+  Standard library only.
 - [WinEvents](WinEvents/), a small Tk viewer for the classic Windows event logs,
   written while learning how Windows stores them: the log list comes out of the
   registry and the message text is assembled from the source's message DLL.

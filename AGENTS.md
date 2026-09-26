@@ -55,8 +55,9 @@ now: `apitrace/apitrace.py`, which carries its own `apitrace/ruff.toml`
 switching off three stylistic rules for that one file with a reason beside
 each; the two files in `WinEvents`, which carry a `WinEvents/ruff.toml` of the
 same kind; the two files in `smtp-sink`, which carry a `smtp-sink/ruff.toml`
-turning off `BLE001` and `S110` for the handlers that keep one bad client from
-taking the server down, again with a reason beside each; the two files in
+turning off `BLE001` and `S110` for the handlers that keep one bad client or
+one failed forward from taking the server down, again with a reason beside
+each; the two files in
 `lock-hashes` and the five in `ha-rest-yaml`, which
 pass on the defaults and carry no `ruff.toml`; and `.github/changed_tools.py`,
 the CI plumbing. It runs
@@ -87,12 +88,13 @@ installs the pinned test dependencies and runs pytest; the second is Windows
 only, because pywin32 is. `cd lock-hashes && bash ./check.sh` runs its
 unittest suite with nothing to install, `cd ha-rest-yaml && bash
 ./check.sh` does the same for that tool's 4 tests, and `cd smtp-sink && bash
-./check.sh` does it for that tool's 77, which need no network: the server tests
-bind the loopback address on a port the operating system picks, and the syslog
-tests replace the logger or the connect with a mock, or open their own
-loopback listener. They take about a second, or about five on Windows, where
-each of the two refused loopback connections in the syslog tests costs two
-seconds.
+./check.sh` does it for that tool's 151, which need no network: the server
+tests bind the loopback address on a port the operating system picks, the
+syslog tests replace the logger or the connect with a mock, or open their own
+loopback listener, and the webhook tests run a small HTTP server of their own
+on the loopback address. They take about four seconds, or about ten on
+Windows, where each of the two refused loopback connections in the syslog
+tests costs two seconds.
 Every one of these was run in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
