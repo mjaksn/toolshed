@@ -1416,10 +1416,12 @@ def setup_syslog(args):
 async def main():
     global syslog, webhook
     # What the sink prints holds addresses from the network, and an address
-    # with a character the console cannot encode, such as an umlaut on a
-    # Windows console redirected to a file, raised from print. That print comes
-    # after the message is in the file but before the client hears 250, so the
-    # client sent it again and the file held it twice. Escaped instead.
+    # with a character the console cannot encode raised from print: on a
+    # Windows console redirected to a file, which writes cp1252, a Polish or
+    # Czech letter, or the U+FFFD any byte that is not UTF-8 becomes. That
+    # print comes after the message is in the file but before the client hears
+    # 250, so the client sent it again and the file held it twice. Escaped
+    # instead.
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
