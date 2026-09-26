@@ -1316,6 +1316,7 @@ class WebhookOptionTests(unittest.TestCase):
 
     def test_refuses_a_header_that_is_not_one(self):
         for text in ("no colon", ": no name", "Bad Name: x", "X-A: line\r\nX-B: forged",
+                     "X-A: trailing\r\n", "X-A: \nleading",
                      "X-A: €", "Content-Length: 5", "transfer-encoding: chunked"):
             with self.subTest(text=text), self.assertRaises(argparse.ArgumentTypeError):
                 smtp_sink.header_pair(text)

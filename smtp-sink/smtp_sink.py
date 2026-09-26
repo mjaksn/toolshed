@@ -950,7 +950,9 @@ def header_pair(text):
     name, colon, value = text.partition(":")
     if not colon:
         raise argparse.ArgumentTypeError('expected "Name: Value", with a colon after the name')
-    value = value.strip()
+    # Spaces and tabs only, HTTP's optional whitespace. A plain strip would
+    # take a trailing line break off before the check below could refuse it.
+    value = value.strip(" \t")
     if not HEADER_NAME.fullmatch(name):
         raise argparse.ArgumentTypeError(f"not a header name: {name!r}")
     if name.lower() in COMPUTED_HEADERS:
