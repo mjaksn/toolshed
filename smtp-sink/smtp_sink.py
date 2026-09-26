@@ -915,10 +915,22 @@ class WebhookSender:
             for name, value in headers:
                 conn.putheader(name, value)
             conn.endheaders()
+            response = None
             if body is not None:
-                for start in range(0, len(body), WEBHOOK_CHUNK):
-                    conn.send(body[start : start + WEBHOOK_CHUNK])
-            response = conn.getresponse()
+                try:
+                    for start in range(0, len(body), WEBHOOK_CHUNK):
+                        conn.send(body[start : start + WEBHOOK_CHUNK])
+                except OSError as exc:
+                    # A server may answer before it has read the whole body,
+                    # a 413 or a redirect, and hang up, and then it is the
+                    # send that fails. What it answered says more than the
+                    # reset does, so it is read if it is there to be read.
+                    try:
+                        response = conn.getresponse()
+                    except (OSError, http.client.HTTPException):
+                        raise exc from None
+            if response is None:
+                response = conn.getresponse()
             # Read, so the server is not cut off mid-reply, but not without
             # limit: nothing in it is used. So nothing that goes wrong reading
             # it counts either: the status has already said how it went, and a

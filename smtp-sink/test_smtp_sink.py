@@ -1882,6 +1882,25 @@ class WebhookSenderTests(unittest.TestCase):
             connection.return_value.getresponse.return_value = answer
             sender.deliver(delivery())
 
+    def test_an_early_answer_to_a_large_body_is_reported_by_its_status(self):
+        sender = smtp_sink.WebhookSender("http://hooks.example.test/x")
+        big = delivery(b"Subject: big\r\n\r\n" + b"x" * 200_000 + b"\r\n")
+        early = mock.Mock(status=413, reason="Payload Too Large")
+        early.read.return_value = b""
+        with mock.patch.object(http.client, "HTTPConnection") as connection:
+            conn = connection.return_value
+            conn.send.side_effect = [None, BrokenPipeError("the server hung up")]
+            conn.getresponse.return_value = early
+            with self.assertRaisesRegex(smtp_sink.WebhookError, "HTTP 413 Payload Too Large"):
+                sender.deliver(big)
+        # With no answer to read, the send's own failure is the one reported.
+        with mock.patch.object(http.client, "HTTPConnection") as connection:
+            conn = connection.return_value
+            conn.send.side_effect = [None, BrokenPipeError("the server hung up")]
+            conn.getresponse.side_effect = http.client.RemoteDisconnected("no answer")
+            with self.assertRaisesRegex(BrokenPipeError, "the server hung up"):
+                sender.deliver(big)
+
     def test_a_given_host_or_accept_encoding_is_sent_once(self):
         # http.client adds both of its own unless told not to, and a second
         # Host header is one a server may well refuse.
