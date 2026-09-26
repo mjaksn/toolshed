@@ -371,13 +371,22 @@ class BoundedMessage(Message):
     of parameters held the thread parsing it for a quarter of an hour. Both
     headers are read through `get`, so cutting them here bounds all of that. A
     real one is a few dozen characters, and the header is whole in `raw`.
+
+    They are also read from the raw value, as header_value reads the rest. The
+    ordinary `get` hands back a header holding raw 8-bit text as an
+    unknown-8bit Header with every high byte replaced, so a filename sent as
+    raw UTF-8 lost every accented letter it had.
     """
 
     def get(self, name, failobj=None):
-        value = super().get(name, failobj)
-        if name.lower() in PARAM_HEADERS and isinstance(value, str) and len(value) > MAX_HEADER_TEXT:
-            return value[:MAX_HEADER_TEXT]
-        return value
+        if name.lower() not in PARAM_HEADERS:
+            return super().get(name, failobj)
+        for key, value in self.raw_items():
+            if key.lower() == name.lower():
+                if any("\udc80" <= c <= "\udcff" for c in value):
+                    value = clean(value)
+                return value[:MAX_HEADER_TEXT]
+        return failobj
 
 
 def parse_message(body):
