@@ -1864,6 +1864,16 @@ class WebhookCommandLineTests(unittest.TestCase):
             self.addCleanup(smtp_sink.webhook.stop, REPLY_TIMEOUT)
         return None, err.getvalue()
 
+    def test_output_a_console_cannot_encode_is_escaped_not_raised(self):
+        # A Windows console redirected to a file encodes cp1252 strictly, and
+        # the address in "logged message" can hold anything.
+        console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", newline="\n")
+        with mock.patch.object(sys, "stdout", console):
+            self.run_main()
+            print("from <üćā@example.test>")
+        console.flush()
+        self.assertEqual(console.buffer.getvalue(), b"from <\xfc\\u0107\\u0101@example.test>\n")
+
     def test_only_the_url_is_needed(self):
         code, _ = self.run_main("--webhook-url", "https://hooks.example.test/mail")
         self.assertIsNone(code)

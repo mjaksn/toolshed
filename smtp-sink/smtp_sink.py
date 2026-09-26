@@ -1319,6 +1319,15 @@ def setup_syslog(args):
 
 async def main():
     global syslog, webhook
+    # What the sink prints holds addresses from the network, and an address
+    # with a character the console cannot encode, such as an umlaut on a
+    # Windows console redirected to a file, raised from print. That print comes
+    # after the message is in the file but before the client hears 250, so the
+    # client sent it again and the file held it twice. Escaped instead.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="backslashreplace")
     ap = argparse.ArgumentParser(
         description="LAN-only SMTP sink that logs mail to a file, and optionally to syslog and a webhook"
     )
