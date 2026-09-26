@@ -572,10 +572,12 @@ def header_value(value):
         return clean(header_text(value))
     cut = len(value) > MAX_HEADER_TEXT
     text = clean(value[:MAX_HEADER_TEXT])
-    decoded = "".join(
+    # Cleaned again once decoded: an encoded word can name a codec such as
+    # unicode-escape, which turns `\ud800` into the lone surrogate itself.
+    decoded = clean("".join(
         ascii_run_text(run) if run.isascii() else run
         for run in NON_ASCII_RUN.split(text)
-    )
+    ))
     return decoded + "..." if cut else decoded
 
 

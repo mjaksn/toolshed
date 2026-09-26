@@ -1597,6 +1597,16 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertTrue(long_value.endswith("..."))
         self.assertLess(len(long_value), smtp_sink.MAX_HEADER_TEXT)
 
+    def test_an_encoded_word_cannot_put_a_lone_surrogate_in_the_json(self):
+        # unicode-escape decodes `\ud800` to the surrogate itself, which a
+        # strict receiver refuses along with the whole body.
+        for prefix in ("", "é "):  # alone, and beside raw 8-bit text
+            with self.subTest(prefix=prefix):
+                body = f"Subject: {prefix}=?unicode-escape?q?=5Cud800?=\r\n\r\nx".encode()
+                text = json.dumps(smtp_sink.webhook_payload(delivery(body)))
+                self.assertNotIn("\\ud800", text)
+                text.encode()
+
     def test_an_escaped_address_stays_escaped(self):
         payload = smtp_sink.webhook_payload(delivery(mail_from="<a\\r@example.test>"))
         self.assertEqual(payload["envelope"]["from"], "<a\\r@example.test>")
