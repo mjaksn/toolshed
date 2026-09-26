@@ -418,9 +418,23 @@ def decoded_header(msg, name):
     return None if value is None else clean(header_text(str(value)))
 
 
-def leaf_parts(msg):
-    """Every part that holds content rather than other parts."""
-    return [part for part in msg.walk() if not part.is_multipart()]
+def content_parts(msg):
+    """Every part that holds content, in order, walking only into multipart.
+
+    `walk` goes into an attached message as well, since a message/rfc822 part
+    holds a message of its own, and then that message's parts pass for the
+    outer one's: its text becomes the text, and the attachment itself is lost.
+    Here an attached message is one part, like any other attachment.
+    """
+    found = []
+    pending = [msg]
+    while pending:
+        part = pending.pop()
+        if part.get_content_maintype() == "multipart" and part.is_multipart():
+            pending.extend(reversed(part.get_payload()))
+        else:
+            found.append(part)
+    return found
 
 
 def attachment_name(part):
@@ -432,35 +446,60 @@ def attachment_name(part):
     return None if name is None else clean(str(name))
 
 
+def is_attachment(part):
+    """Whether a part is attached rather than part of the message's text.
+
+    Marked as an attachment, carrying a filename whatever its disposition, or
+    a message in its own right. A text part with a filename is a file that
+    happens to be text, not what the sender wrote.
+    """
+    return (
+        part.get_content_disposition() == "attachment"
+        or attachment_name(part) is not None
+        or part.get_content_maintype() == "message"
+    )
+
+
 def first_text(msg, content_type):
-    """The first inline part of `content_type`, decoded, or None."""
-    for part in leaf_parts(msg):
-        if part.get_content_type() == content_type and part.get_content_disposition() != "attachment":
+    """The first part of `content_type` that is not an attachment, or None."""
+    for part in content_parts(msg):
+        if part.get_content_type() == content_type and not is_attachment(part):
             return clean(part_text(part))
     return None
+
+
+def part_size(part):
+    """A part's size in octets once decoded, or None if it cannot be had.
+
+    An attached message is not a payload to decode but a message, so its size
+    is that of the message written out again, which is close to, though not
+    always exactly, what arrived.
+    """
+    if part.is_multipart():
+        try:
+            return sum(len(inner.as_bytes()) for inner in part.get_payload())
+        except (LookupError, UnicodeError, ValueError, TypeError):
+            return None
+    payload = part.get_payload(decode=True)
+    return len(payload) if isinstance(payload, bytes) else None
 
 
 def attachments(msg):
     """What the message carries besides its text, described, not included.
 
-    A part counts when it is marked as an attachment or has a filename. Its
-    content is in `raw` with the rest of the message, so only the size is given
-    here, as decoded octets.
+    Each part `is_attachment` accepts. Its content is in `raw` with the rest
+    of the message, so only its size is given here.
     """
-    found = []
-    for part in leaf_parts(msg):
-        filename = attachment_name(part)
-        disposition = part.get_content_disposition()
-        if disposition != "attachment" and filename is None:
-            continue
-        payload = part.get_payload(decode=True)
-        found.append({
-            "filename": filename,
+    return [
+        {
+            "filename": attachment_name(part),
             "content_type": part.get_content_type(),
-            "disposition": disposition,
-            "size": len(payload) if isinstance(payload, bytes) else 0,
-        })
-    return found
+            "disposition": part.get_content_disposition(),
+            "size": part_size(part),
+        }
+        for part in content_parts(msg)
+        if is_attachment(part)
+    ]
 
 
 class Delivery:

@@ -1273,6 +1273,29 @@ class WebhookPayloadTests(unittest.TestCase):
              "disposition": "attachment", "size": len(b"\x00\x01binary junk")},
         ])
 
+    def test_an_attached_message_or_named_file_is_not_the_text(self):
+        # An email forwarded as an attachment has text parts of its own, and
+        # a text file sent inline still has a filename. Neither is what the
+        # sender wrote, and both are attachments.
+        body = (
+            'Subject: outer\r\nContent-Type: multipart/mixed; boundary="M"\r\n\r\n'
+            "--M\r\nContent-Type: text/plain\r\n\r\nthe outer words\r\n"
+            "--M\r\nContent-Type: text/html\r\n"
+            'Content-Disposition: inline; filename="page.html"\r\n\r\n<p>a file</p>\r\n'
+            "--M\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\n"
+            "Subject: inner\r\n\r\nthe inner words\r\n"
+            "--M--\r\n"
+        ).encode("ascii")
+        message = smtp_sink.webhook_payload(delivery(body))["message"]
+        self.assertEqual(message["text"], "the outer words")
+        self.assertIsNone(message["html"])
+        self.assertEqual(
+            [(a["filename"], a["content_type"], a["disposition"]) for a in message["attachments"]],
+            [("page.html", "text/html", "inline"), (None, "message/rfc822", "attachment")],
+        )
+        self.assertEqual(message["attachments"][0]["size"], len(b"<p>a file</p>"))
+        self.assertGreater(message["attachments"][1]["size"], len(b"the inner words"))
+
     def test_raw_is_the_message_byte_for_byte(self):
         body = b"Subject: s\r\n\r\nlatin-1 \xe9 and a bare\nline feed\r\n"
         raw = smtp_sink.webhook_payload(delivery(body))["message"]["raw"]
