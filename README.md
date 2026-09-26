@@ -40,6 +40,10 @@ a repository of its own goes in here.
 - [RemoveNewline](RemoveNewline/), a PowerShell module whose one command strips
   every line break from a text file, in every form a line break takes, and
   keeps the encoding and byte order mark it found.
+- [smtp-sink](smtp-sink/), a Python script that runs an SMTP server on a LAN
+  which accepts mail and never delivers it, appending each message to a log
+  file and optionally forwarding a summary to syslog, for the devices that can
+  only report by sending mail. Standard library only.
 - [WinEvents](WinEvents/), a small Tk viewer for the classic Windows event logs,
   written while learning how Windows stores them: the log list comes out of the
   registry and the message text is assembled from the source's message DLL.
@@ -104,7 +108,7 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Nine tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
+Ten tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
 from the gallery and verified against a recorded hash rather than installed, so
 what the check ran against is the same module every time. That is the same
 arrangement the tool already uses for powershell-yaml at run time, and for the
@@ -114,10 +118,12 @@ that analyzer script pointed at its own directory, with its own settings file.
 same way and then run their own tests, written in plain PowerShell.
 `BasicUpsAdapter` runs its own test suite under `node --test`, with nothing to
 install first. `WinEvents` installs its test dependencies, pinned by version and
-hash, and runs `pytest`. `lock-hashes` and `ha-rest-yaml` run their own tests
-under `unittest`, with nothing to install. Those last four each keep the command
-in a `check.sh` beside its `ci.json`, so the check CI runs is one a person can
-run too.
+hash, and runs `pytest`. `lock-hashes`, `ha-rest-yaml` and `smtp-sink` run
+their own tests under `unittest`, with nothing to install; the last of those
+starts the real server on the loopback address and speaks SMTP to it, so it
+needs no network and no privileges. Those last five each keep the command in a
+`check.sh` beside its `ci.json`, so the check CI runs is one a person can run
+too.
 
 ## Licence
 

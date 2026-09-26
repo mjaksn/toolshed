@@ -1,0 +1,28 @@
+# Lint settings for smtp-sink only. Ruff resolves configuration per file against the
+# nearest config in its ancestors, so this applies to the two files here and leaves the
+# rest of the shed on the defaults.
+#
+# Every ignore below is about one thing: a server that stays up. This listens on a LAN
+# for whatever a printer or a NAS decides to send, and the failure mode that matters is
+# the process dying at three in the morning because one device sent something strange.
+# Each is a decision rather than a rule nobody looked at. If any of them stops being
+# true, delete the line and fix the code.
+
+[lint]
+ignore = [
+    # Four blind `except Exception` handlers, each one a deliberate bulkhead:
+    #   - `send_syslog`, where the remote server is a UDP or TCP endpoint that can
+    #     fail in as many ways as the network has; the message is already in the log
+    #     file by then, so a failed forward is reported on stderr and nothing more;
+    #   - the per-client handler, whose comment says the point outright: one bad client
+    #     must not take the server down for every other device on the network;
+    #   - building the syslog line after the client has had its 250, where a
+    #     message that cannot be summarised costs its forward and not the connection;
+    #   - `wait_closed` in that handler's finally block, below.
+    "BLE001",
+
+    # `try`/`except`/`pass` around `wait_closed()` in the handler's finally block. The
+    # connection is being torn down and the peer has often gone already, so there is
+    # nothing to log and nothing to do: the socket is closed either way.
+    "S110",
+]
