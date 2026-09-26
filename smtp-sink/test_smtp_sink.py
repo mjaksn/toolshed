@@ -1754,6 +1754,8 @@ class WebhookOptionTests(unittest.TestCase):
                     "http://user:pw@example.test/", "http://example.test:0/",
                     "http://example.test:99999/", "http://example.test:port/",
                     "http://[::1/x",
+                    # A colon with no port, which would otherwise mean 80.
+                    "http://example.test:/hook", "https://[::1]:/hook", "http://example.test:",
                     # What http.client would refuse on every request instead.
                     "http://example.test/a b", "http://example.test/?q=a b",
                     "http://example.test/café", "http://example.test/a\x01b",

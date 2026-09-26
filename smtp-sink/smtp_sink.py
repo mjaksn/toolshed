@@ -1308,6 +1308,11 @@ def webhook_url(text):
         raise argparse.ArgumentTypeError(
             "credentials in the URL are not sent; use --header \"Authorization: ...\" instead"
         )
+    # A colon with nothing after it reads as no port at all, so the request
+    # would quietly go to 80 or 443, perhaps a different service from the one
+    # meant. Refused, as --syslog refuses the same typo.
+    if parts.netloc.endswith(":"):
+        raise argparse.ArgumentTypeError("the webhook URL has a colon with no port after it")
     try:
         port = parts.port
     except ValueError:  # out of range, or not a number
