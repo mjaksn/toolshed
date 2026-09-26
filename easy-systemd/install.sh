@@ -3,8 +3,8 @@
 # when it stops. See README.md, or run with -h.
 set -euo pipefail
 
-# The line uninstall.sh looks for before it will touch a unit. It must match
-# the copy in uninstall.sh exactly.
+# The first line of every unit this writes, which uninstall.sh looks for
+# before it will touch one. It must match the copy in uninstall.sh exactly.
 MARKER='# Created by easy-systemd install.sh; uninstall.sh removes only units carrying this line.'
 UNIT_DIR=/etc/systemd/system
 
@@ -121,7 +121,7 @@ done
 unit=$name.service
 path=$UNIT_DIR/$unit
 if [[ -e $path || -L $path ]]; then
-    grep -qxF -- "$MARKER" "$path" 2>/dev/null \
+    [[ -f $path && $(head -n1 -- "$path" 2>/dev/null) == "$MARKER" ]] \
         || die "$path exists and was not created by install.sh; leaving it alone"
 elif systemctl cat -- "$unit" >/dev/null 2>&1; then
     die "a unit called $unit already exists elsewhere; choose another NAME"

@@ -77,8 +77,9 @@ Every unit `install.sh` writes begins with this comment:
 # Created by easy-systemd install.sh; uninstall.sh removes only units carrying this line.
 ```
 
-`uninstall.sh` refuses any unit without that exact line, and if one name in a
-list is refused, none of the others are removed either. Deleting the line by
+`uninstall.sh` refuses any unit whose first line is not exactly that, and any
+that is a symbolic link, and if one name in a list is refused, none of the
+others are removed either. Deleting the line by
 hand is the way to keep a unit from ever being touched by `uninstall.sh`.
 
 ## What it needs

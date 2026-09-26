@@ -29,6 +29,7 @@ fi
 # as them. Each test says which user it wants instead.
 unset SUDO_USER
 
+marker=$(sed -n "s/^MARKER='\(.*\)'\$/\1/p" install.sh)
 tmp=$(mktemp -d)
 # The service user has to reach the working directory, and mktemp makes its
 # directory private. The space and the % are there to be escaped.
@@ -99,7 +100,7 @@ main_pid() { systemctl show -p MainPID --value -- "$1.service"; }
 running() { [[ $(systemctl is-active -- "$1.service") == active ]]; }
 restarted() { local now; now=$(main_pid "$1"); [[ $now != 0 && $now != "$2" ]]; }
 runs() { ps -o args= -p "$(main_pid "$1")" | grep -qxF -- "$2"; }
-first_line_is_marker() { [[ $(head -n1 "$(unit_file "$1")") == "# Created by easy-systemd"* ]]; }
+first_line_is_marker() { [[ $(head -n1 "$(unit_file "$1")") == "$marker" ]]; }
 holds() { [[ -s $1 && $(cat "$1") == "$2" ]]; }
 lists() { bash uninstall.sh | grep -qx "  $1"; }
 dead() { ! kill -0 "$1" 2>/dev/null; }
@@ -129,6 +130,10 @@ refuses "a name the system already uses" "already exists elsewhere" run_install 
 printf '[Service]\nExecStart=/bin/true\n' >"$(unit_file es-check-foreign)"
 refuses "a unit install.sh did not create" "was not created by install.sh" run_install es-check-foreign -- sleep 1
 expect "and leaves that unit as it was" grep -qx 'ExecStart=/bin/true' "$(unit_file es-check-foreign)"
+# The marker, but not first, which is the only place install.sh puts it.
+printf '[Service]\n%s\nExecStart=/bin/true\n' "$marker" >"$(unit_file es-check-late)"
+refuses "a unit with the marker below the first line" "was not created by install.sh" \
+    run_install es-check-late -- sleep 1
 expect "nothing was installed by any of these" test ! -e "$(unit_file es-check-x)"
 
 echo "Installing"
@@ -181,6 +186,8 @@ pid=$(main_pid es-check-sleep)
 echo "Uninstalling"
 expect "a bare run lists what install.sh created" lists es-check-sleep
 expect "and not what it did not" eval '! lists es-check-foreign'
+expect "nor a unit with the marker further down" eval '! lists es-check-late'
+refuses "that unit by name" "was not created by install.sh" run_uninstall es-check-late
 refuses "a name that is not installed" "no such unit" run_uninstall es-check-none
 refuses "a list holding one foreign unit" "was not created by install.sh" \
     run_uninstall es-check-args es-check-foreign
@@ -195,7 +202,7 @@ if [[ ${#existing[@]} -eq 0 ]]; then
     run_uninstall --all
     expect "--all removes every unit install.sh created" gone es-check-env
     expect "all of them" gone es-check-restart
-    expect "and leaves the foreign one" test -e "$(unit_file es-check-foreign)"
+    expect "and leaves the foreign ones" test -e "$(unit_file es-check-foreign)" -a -e "$(unit_file es-check-late)"
 else
     echo "skip  --all, since install.sh has units of its own here: ${existing[*]}"
 fi

@@ -3,7 +3,7 @@
 # README.md, or run with -h.
 set -euo pipefail
 
-# The line install.sh writes into every unit it creates. It must match the
+# The line install.sh writes first in every unit it creates. It must match the
 # copy in install.sh exactly.
 MARKER='# Created by easy-systemd install.sh; uninstall.sh removes only units carrying this line.'
 UNIT_DIR=/etc/systemd/system
@@ -25,11 +25,17 @@ die() {
     exit 1
 }
 
-# Prints the name of every unit carrying the marker, one per line.
+# Succeeds for a unit file install.sh wrote: a regular file, not a link, whose
+# first line is the marker.
+ours() {
+    [[ -f $1 && ! -L $1 ]] && [[ $(head -n1 -- "$1" 2>/dev/null) == "$MARKER" ]]
+}
+
+# Prints the name of every unit install.sh wrote, one per line.
 managed() {
     local path
     for path in "$UNIT_DIR"/*.service; do
-        if [[ -f $path ]] && grep -qxF -- "$MARKER" "$path" 2>/dev/null; then
+        if ours "$path"; then
             basename -- "$path" .service
         fi
     done
@@ -73,9 +79,8 @@ esac
 for name in "${names[@]}"; do
     path=$UNIT_DIR/$name.service
     [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "not a valid NAME: $name"
-    [[ -e $path ]] || die "no such unit: $path"
-    grep -qxF -- "$MARKER" "$path" 2>/dev/null \
-        || die "$path was not created by install.sh; leaving it alone"
+    [[ -e $path || -L $path ]] || die "no such unit: $path"
+    ours "$path" || die "$path was not created by install.sh; leaving it alone"
 done
 
 for name in "${names[@]}"; do
