@@ -1814,6 +1814,23 @@ class WebhookSenderTests(unittest.TestCase):
                 expected = ssl.CERT_REQUIRED if verify else ssl.CERT_NONE
                 self.assertEqual(connection.call_args.kwargs["context"].verify_mode, expected)
 
+    def test_a_plain_http_connection_carries_the_timeout(self):
+        sender = smtp_sink.WebhookSender("http://hooks.example.test/x")
+        answer = mock.Mock(status=204, reason="No Content")
+        answer.read.return_value = b""
+        with mock.patch.object(http.client, "HTTPConnection") as connection:
+            connection.return_value.getresponse.return_value = answer
+            sender.deliver(delivery())
+        connection.assert_called_once_with("hooks.example.test", 80, timeout=smtp_sink.WEBHOOK_TIMEOUT)
+
+    def test_a_webhook_that_never_answers_times_out(self):
+        hook = RecordingServer(self, stall=True)
+        with mock.patch.object(smtp_sink, "WEBHOOK_TIMEOUT", 0.3):
+            self.send(hook)
+        self.assertEqual(len(hook.requests), 1)
+        self.assertIn("timed out", self.err.getvalue())
+        self.assertIn("failed, not sent", self.err.getvalue())
+
     def test_a_given_host_or_accept_encoding_is_sent_once(self):
         # http.client adds both of its own unless told not to, and a second
         # Host header is one a server may well refuse.
