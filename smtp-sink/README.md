@@ -84,7 +84,10 @@ off the public internet. That is why `--bind` has to be given. A transaction
 takes at most 100 recipients, and the next draws a 452 while those already
 taken still get the message. An address longer than 256 characters as
 recorded, escapes included, draws a 501. Both limits keep one connection from
-holding an envelope of unbounded size in memory until DATA. A message larger
+holding an envelope of unbounded size in memory until DATA. A MAIL or RCPT
+argument over 1000 characters draws a 500 without being read for an address,
+since picking one out of a line of megabytes would hold up every other client
+while it happened. A message larger
 than 10 MB, counted in octets as the `SIZE` the server advertises promises, is
 refused with a 552 and the connection carries on. A single line of any length
 up to that limit is taken, whatever RFC 5321 says about a thousand octets,

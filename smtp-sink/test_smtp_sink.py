@@ -955,6 +955,29 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("To:       <c@example.test>\n", text)
         self.assertNotIn("x" * smtp_sink.MAX_PATH, text)
 
+    async def test_an_argument_past_the_limit_draws_500_unparsed(self):
+        reader, writer = await self.connect()
+        await self.command(reader, writer, "EHLO client.example.test")
+        padding = " X-PAD=" + "x" * smtp_sink.MAX_ARGUMENT
+        with mock.patch.object(smtp_sink, "envelope_path", wraps=smtp_sink.envelope_path) as parse:
+            reply = await self.command(reader, writer, "MAIL FROM:<a@example.test>" + padding)
+            self.assertTrue(reply[0].startswith("500"), reply)
+            reply = await self.command(reader, writer, "RCPT TO:<b@example.test>")
+            self.assertTrue(reply[0].startswith("503"), reply)
+
+            await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+            reply = await self.command(reader, writer, "RCPT TO:<b@example.test>" + padding)
+            self.assertTrue(reply[0].startswith("500"), reply)
+            # Neither long argument reached the parser; the short MAIL did.
+            self.assertEqual(parse.call_count, 1)
+        # The transaction survives the refused recipient and takes the next.
+        await self.command(reader, writer, "RCPT TO:<c@example.test>")
+        await self.command(reader, writer, "DATA")
+        writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+        await writer.drain()
+        self.assertTrue((await read_reply(reader))[0].startswith("250"))
+        self.assertIn("To:       <c@example.test>\n", self.log.read_bytes().decode("utf-8"))
+
     async def test_rset_clears_the_envelope(self):
         reader, writer = await self.connect()
         await self.command(reader, writer, "EHLO client.example.test")

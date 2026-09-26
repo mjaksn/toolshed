@@ -49,6 +49,14 @@ LINE_LIMIT = MAX_MESSAGE_BYTES + 2
 MAX_RECIPIENTS = 100
 MAX_PATH = 256
 
+# The longest MAIL or RCPT argument that is parsed at all. Finding the path and
+# escaping it both walk the text a character at a time on the event loop, so a
+# 10 MB argument held up every client for over a second before its 501. A
+# longer one draws a 500 unread. RFC 5321 allows a command line of 512 octets
+# (4.5.3.1.4), and the only parameters this server invites, SIZE and BODY, add
+# a few dozen, so this is roomy for any client and still cheap to walk.
+MAX_ARGUMENT = 1000
+
 # How many lines can wait for syslog. Each is at most `--syslog-max`
 # characters, 2000 by default, so a full queue is a few megabytes. It holds
 # finished lines rather than the messages they came from, which can be 10 MB
@@ -363,6 +371,17 @@ async def handle_client(reader, writer, args):
         """A command line, as text. DATA reads bytes instead."""
         return (await readline_raw()).decode("utf-8", "replace")
 
+    async def take_path(arg):
+        """The address in a MAIL or RCPT argument, or None once refused."""
+        if len(arg) > MAX_ARGUMENT:
+            await send("500 Line too long")
+            return None
+        path = envelope_path(arg)
+        if len(path) > MAX_PATH:
+            await send("501 Path too long")
+            return None
+        return path
+
     mail_from = None
     rcpts = []
 
@@ -387,12 +406,11 @@ async def handle_client(reader, writer, args):
                 await send(f"250-SIZE {MAX_MESSAGE_BYTES}")
                 await send("250 8BITMIME")
             elif verb == "MAIL":
-                path = envelope_path(arg)
-                if len(path) > MAX_PATH:
+                path = await take_path(arg)
+                if path is None:
                     # The client meant to start a transaction, so an older one
                     # is not left standing for its DATA to be logged under.
                     mail_from, rcpts = None, []
-                    await send("501 Path too long")
                     continue
                 mail_from = path
                 rcpts = []
@@ -404,9 +422,8 @@ async def handle_client(reader, writer, args):
                 if mail_from is None:
                     await send("503 Need MAIL first")
                     continue
-                path = envelope_path(arg)
-                if len(path) > MAX_PATH:
-                    await send("501 Path too long")
+                path = await take_path(arg)
+                if path is None:
                     continue
                 if len(rcpts) >= MAX_RECIPIENTS:
                     await send("452 Too many recipients")
