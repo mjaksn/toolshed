@@ -1352,13 +1352,18 @@ class WebhookOptionTests(unittest.TestCase):
         for url in ("ftp://example.test/", "hooks.example.test/path", "http://",
                     "http://user:pw@example.test/", "http://example.test:0/",
                     "http://example.test:99999/", "http://example.test:port/",
-                    "http://[::1/x"):
+                    "http://[::1/x",
+                    # What http.client would refuse on every request instead.
+                    "http://example.test/a b", "http://example.test/?q=a b",
+                    "http://example.test/café", "http://example.test/a\x01b",
+                    "http://example.test/a\tb", "http://ex ample.test/", "http://example.test/\x7f"):
             with self.subTest(url=url), self.assertRaises(argparse.ArgumentTypeError):
                 smtp_sink.webhook_url(url)
 
     def test_a_refusal_does_not_print_the_url(self):
         for url in ("ftp://example.test/s3cret", "http:///s3cret", "http://example.test:0/s3cret",
-                    "http://u:s3cret@example.test/", "http://[::1/s3cret"):
+                    "http://u:s3cret@example.test/", "http://[::1/s3cret",
+                    "http://example.test/s3cret token", "http://example.test/s3crét"):
             with self.subTest(url=url):
                 with self.assertRaises(argparse.ArgumentTypeError) as refused:
                     smtp_sink.webhook_url(url)

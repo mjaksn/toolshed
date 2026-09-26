@@ -985,6 +985,15 @@ def webhook_url(text):
     journal as everything else. A ValueError from the parser is turned into a
     refusal here for the same reason: argparse would print the argument with it.
     """
+    # http.client refuses a request line holding a space, a control character
+    # or anything outside ASCII, but only when the request is made, once per
+    # message, and its refusal quotes the whole path. urlsplit would quietly
+    # drop a tab or line break, so the text is checked before it is split.
+    if any(not "\x21" <= c <= "\x7e" for c in text):
+        raise argparse.ArgumentTypeError(
+            "the webhook URL can hold only printable ASCII, with no spaces;"
+            " percent-encode anything else"
+        )
     try:
         parts = urllib.parse.urlsplit(text)
     except ValueError:  # an unbalanced bracket around an IPv6 host, say
