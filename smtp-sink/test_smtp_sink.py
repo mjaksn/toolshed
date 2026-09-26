@@ -1559,6 +1559,37 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual([a["filename"] for a in message["attachments"]], ["f0", "f1"])
         self.assertEqual(base64.b64decode(message["raw"]), body)
 
+    def test_a_container_the_budget_emptied_costs_only_its_size(self):
+        # The last part the budget keeps can be a container whose own parts
+        # are then dropped, which leaves it with no payload at all. Encoded,
+        # or nested in another attachment, that raised out of part_size and
+        # cost every field the message had.
+        encoded = (
+            'Subject: s\r\nContent-Type: multipart/mixed; boundary="M"\r\n\r\n'
+            "--M\r\nContent-Type: text/plain\r\n\r\nthe text\r\n"
+            "--M\r\nContent-Type: message/rfc822\r\nContent-Transfer-Encoding: base64\r\n"
+            "Content-Disposition: attachment\r\n\r\nSubject: inner\r\n\r\ninner\r\n"
+            "--M--\r\n"
+        )
+        # Parts are counted in the order they are parsed, so the text comes
+        # first and the budget runs out at the message inside the attachment.
+        nested = (
+            'Subject: s\r\nContent-Type: multipart/mixed; boundary="M"\r\n\r\n'
+            "--M\r\nContent-Type: text/plain\r\n\r\nthe text\r\n"
+            '--M\r\nContent-Type: multipart/mixed; boundary="N"\r\n'
+            "Content-Disposition: attachment\r\n\r\n"
+            "--N\r\nContent-Type: message/rfc822\r\n\r\nSubject: inner\r\n\r\ninner\r\n--N--\r\n"
+            "--M--\r\n"
+        )
+        for name, body, parts in (("encoded", encoded, 2), ("nested", nested, 3)):
+            with self.subTest(name), mock.patch.object(smtp_sink, "MAX_PARSED_PARTS", parts):
+                message = smtp_sink.webhook_payload(delivery(body.encode("ascii")))["message"]
+                self.assertIsNone(message["parse_error"])
+                self.assertTrue(message["incomplete"])
+                self.assertEqual(message["subject"], "s")
+                self.assertEqual(message["text"], "the text")
+                self.assertIsNone(message["attachments"][0]["size"])
+
     def test_parameter_headers_are_cut_before_they_are_split(self):
         # Splitting into parameters is quadratic, and the parser does it for
         # every multipart boundary: a message-sized Content-Type of them held

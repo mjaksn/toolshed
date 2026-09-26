@@ -712,13 +712,21 @@ def part_size(part):
     An attached message, or an attached multipart part, holds parts rather
     than a payload to decode, so its size is that of those parts written out
     again, which is close to, though not always exactly, what arrived.
+
+    A container whose parts the parse budget dropped has nothing at all where
+    its payload would be, and the email package raises on that rather than
+    saying so, whether it is asked to decode it or to write it out as part of
+    something larger, so either way that is a size that cannot be had.
     """
+    if part.get_payload() is None:
+        return None
     if part.is_multipart():
         try:
             return sum(len(inner.as_bytes()) for inner in part.get_payload())
         # RecursionError: the generator writes nested messages out recursively,
         # and one attached inside another a few hundred deep runs out of stack.
-        except (LookupError, RecursionError, UnicodeError, ValueError, TypeError):
+        # AttributeError: a container inside this one that the budget emptied.
+        except (AttributeError, LookupError, RecursionError, UnicodeError, ValueError, TypeError):
             return None
     payload = part.get_payload(decode=True)
     return len(payload) if isinstance(payload, bytes) else None
