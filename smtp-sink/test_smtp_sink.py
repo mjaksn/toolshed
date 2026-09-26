@@ -1162,6 +1162,41 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(reply[0].startswith("250"), reply)
         self.assertEqual(seen, {"free": False, "logged": True})
 
+    async def test_a_full_webhook_queue_is_reported_even_if_the_250_fails(self):
+        # A client gone by the time its 250 is written ends the handler right
+        # there. The message was logged and refused by the webhook's queue,
+        # and that still has to be said.
+        class GoneAt250:
+            def __init__(self, writer):
+                self._writer = writer
+
+            def __getattr__(self, name):
+                return getattr(self._writer, name)
+
+            def write(self, data):
+                if data.startswith(b"250 OK: queued"):
+                    raise ConnectionResetError("the client has gone")
+                self._writer.write(data)
+
+        server = await asyncio.start_server(
+            lambda r, w: smtp_sink.handle_client(r, GoneAt250(w), self.args), "127.0.0.1", 0,
+            limit=smtp_sink.LINE_LIMIT,
+        )
+        self.addAsyncCleanup(server.wait_closed)
+        self.addCleanup(server.close)
+        err = io.StringIO()
+        with (
+            mock.patch.object(smtp_sink, "webhook", mock.Mock(submit=lambda delivery: False)),
+            contextlib.redirect_stderr(err),
+        ):
+            reader, writer = await asyncio.open_connection("127.0.0.1", server.sockets[0].getsockname()[1])
+            self.clients.append(writer)
+            await read_reply(reader)
+            reply = await self.send_message(reader, writer, "Subject: s\r\n\r\nbody")
+        self.assertEqual(reply, [])  # hung up on, not answered
+        self.assertIn(b"Subject: s\r\n", self.log.read_bytes())
+        self.assertIn("webhook queue full", err.getvalue())
+
     async def test_a_full_webhook_queue_costs_the_send_not_the_message(self):
         sender = smtp_sink.WebhookSender("http://192.0.2.1/")  # never started
         err = io.StringIO()

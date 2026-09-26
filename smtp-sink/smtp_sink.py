@@ -1071,6 +1071,13 @@ async def handle_client(reader, writer, args):
                         mail_from, rcpts = None, []
                         continue
                     print(f"[{peer[0]}] logged message from {mail_from} to {rcpts}")
+                    # Said now, before anything that talks to the client: if
+                    # the 250 below finds the connection gone, the handler
+                    # ends there, and a message the webhook never got would
+                    # have left no trace.
+                    if queued is False:
+                        print(f"[{peer[0]}] webhook queue full, not sent;"
+                              " the message is in the log file", file=sys.stderr)
                     # The message is safe in the file, so the client hears so
                     # now, before the forward. Kept waiting on a syslog server
                     # that has gone away, a client can time out and send the
@@ -1108,9 +1115,6 @@ async def handle_client(reader, writer, args):
                             except asyncio.QueueFull:
                                 print(f"[{peer[0]}] syslog queue full, not forwarded;"
                                       " the message is in the log file", file=sys.stderr)
-                    if queued is False:
-                        print(f"[{peer[0]}] webhook queue full, not sent;"
-                              " the message is in the log file", file=sys.stderr)
                 mail_from, rcpts = None, []
             elif verb == "RSET":
                 mail_from, rcpts = None, []
