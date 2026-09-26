@@ -619,11 +619,20 @@ def header_value(value):
     text = text[:MAX_HEADER_TEXT]
     # Cleaned again once decoded: an encoded word can name a codec such as
     # unicode-escape, which turns `\ud800` into the lone surrogate itself.
-    decoded = clean("".join(
+    decoded = decode_runs(text)
+    return decoded + "..." if cut else decoded
+
+
+def decode_runs(text):
+    """`text` with the encoded words in its ASCII runs decoded, and cleaned.
+
+    For a value that may hold non-ASCII text beside encoded words, which
+    `decode_header` cannot take whole; see header_value.
+    """
+    return clean("".join(
         ascii_run_text(run) if run.isascii() else run
         for run in NON_ASCII_RUN.split(text)
     ))
-    return decoded + "..." if cut else decoded
 
 
 def ascii_run_text(run):
@@ -679,13 +688,15 @@ def attachment_name(part):
 
     `get_filename` decodes RFC 2231, the standard way to put a non-ASCII name
     in a parameter, but Gmail and Outlook use RFC 2047 encoded words there
-    instead, which it leaves alone, so those are decoded here.
+    instead, which it leaves alone, so those are decoded here. A name can
+    also arrive as raw UTF-8, which BoundedMessage has already read as text,
+    beside encoded words, so they are decoded run by run as a header is.
     """
     try:
         name = part.get_filename()
     except (HeaderParseError, LookupError, UnicodeError, ValueError, TypeError):
         return None
-    return None if name is None else clean(header_text(str(name)))
+    return None if name is None else decode_runs(str(name))
 
 
 def is_attachment(part):
