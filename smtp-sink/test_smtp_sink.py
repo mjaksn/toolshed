@@ -1334,6 +1334,17 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual(message["subject"], "caf� �")
         self.assertEqual(message["headers"][1]["value"], "�")
 
+    def test_a_huge_header_is_cut_before_it_is_decoded(self):
+        # Decoding is quadratic in the length: a message-sized header of
+        # encoded words, decoded whole, held the sender thread for hours.
+        value = "=?utf-8?q?a?= " * 100_000
+        with mock.patch.object(smtp_sink, "decode_header", wraps=smtp_sink.decode_header) as decode:
+            text = smtp_sink.header_text(value)
+        self.assertEqual(len(decode.call_args.args[0]), smtp_sink.MAX_HEADER_TEXT)
+        self.assertTrue(text.startswith("aaaa"))
+        self.assertTrue(text.endswith("..."))
+        self.assertEqual(smtp_sink.header_text("short"), "short")
+
     def test_a_folded_header_is_unfolded_however_it_is_encoded(self):
         body = (
             b"Subject: a subject long enough\r\n\tto be folded\r\n"

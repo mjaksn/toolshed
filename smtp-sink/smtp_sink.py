@@ -99,6 +99,13 @@ WEBHOOK_TIMEOUT = 10
 WEBHOOK_QUEUE_SIZE = 1000
 WEBHOOK_QUEUE_BYTES = 64 * 1024 * 1024
 
+# The longest header value that is decoded, in characters; see header_text.
+# Decoding this much takes a millisecond or two, so a message that is nothing
+# but headers of encoded words, each just this long, takes a few seconds in
+# all rather than hours. A real header is far shorter, and what is cut off is
+# still in the log file and in the webhook's `raw`.
+MAX_HEADER_TEXT = 4096
+
 # A line break that folds a header onto the next line, which starts with a
 # space or tab (RFC 5322, 2.2.3). A bare LF counts as well as CRLF, since the
 # sink keeps whatever line endings a message arrived with.
@@ -321,11 +328,20 @@ def header_text(value):
     a syslog line and is what most devices send the moment a degree sign or an
     accent turns up. Anything that cannot be decoded is passed through as it
     came, because an unreadable subject beats a forward that did not happen.
+
+    Only the first MAX_HEADER_TEXT characters are decoded, and a longer value
+    ends in an ellipsis. Decoding takes time that grows with the square of the
+    length, so one header of encoded words the size of a whole message would
+    hold the thread doing it for hours.
     """
+    cut = len(value) > MAX_HEADER_TEXT
+    if cut:
+        value = value[:MAX_HEADER_TEXT]
     try:
-        return str(make_header(decode_header(value)))
+        text = str(make_header(decode_header(value)))
     except (HeaderParseError, LookupError, UnicodeDecodeError, ValueError):
-        return value
+        text = value
+    return text + "..." if cut else text
 
 
 def part_text(part):

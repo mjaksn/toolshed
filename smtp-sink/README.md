@@ -131,7 +131,7 @@ shortened:
 | `helo` | The name the client gave in HELO or EHLO, or null if it gave none: the first 255 characters of what it sent, control characters written out as escapes as in an address. |
 | `envelope` | The sender from MAIL and the recipients from RCPT, exactly as the log file records them, ESMTP parameters dropped. A control character in an address stays written out as an escape, so a carriage return arrives as the two characters `\r`. |
 | `message.size` | The message in octets, as received. |
-| `message.subject`, `from`, `to`, `cc`, `reply_to`, `date`, `message_id` | Those headers as text, unfolded onto one line and with RFC 2047 encoded words decoded, or null for one the message does not have. |
+| `message.subject`, `from`, `to`, `cc`, `reply_to`, `date`, `message_id` | Those headers as text, unfolded onto one line and with RFC 2047 encoded words decoded, or null for one the message does not have. A value over 4096 characters is cut to that before decoding and ends in `...`, because decoding takes time that grows with the square of the length; the whole of it is in `raw`. |
 | `message.content_type` | The message's own content type, such as `text/plain` or `multipart/mixed`. |
 | `message.headers` | Every header of the message, in order, decoded the same way, a repeated one listed each time. |
 | `message.text`, `message.html` | The first text/plain and first text/html part that is not an attachment, with base64 or quoted-printable undone and the part's charset decoded, or null if there is none. |
