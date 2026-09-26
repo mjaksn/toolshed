@@ -1088,6 +1088,25 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(queued[0].helo)
         self.assertIsNone(smtp_sink.webhook_payload(queued[0])["helo"])
 
+    async def test_the_helo_name_is_escaped_cut_and_kept_through_rset(self):
+        queued = []
+        webhook = mock.Mock(submit=lambda delivery: queued.append(delivery) or True)
+        name = "ups\x1b[2J" + "x" * 300
+        with mock.patch.object(smtp_sink, "webhook", webhook):
+            reader, writer = await self.connect()
+            await self.command(reader, writer, f"EHLO {name}")
+            await self.command(reader, writer, "RSET")
+            await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+            await self.command(reader, writer, "RCPT TO:<b@example.test>")
+            await self.command(reader, writer, "DATA")
+            writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+            await writer.drain()
+            self.assertTrue((await read_reply(reader))[0].startswith("250"))
+        helo = queued[0].helo
+        # Cut to MAX_HELO before escaping, so the escape makes it longer.
+        self.assertEqual(helo, "ups\\x1b[2J" + "x" * (smtp_sink.MAX_HELO - len("ups\x1b[2J")))
+        self.assertNotIn("\x1b", helo)
+
     async def test_a_stalled_webhook_holds_up_nothing(self):
         # A webhook that takes the request and never answers. The client gets
         # its 250, and the same connection and a new one both carry on, all
@@ -1105,8 +1124,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             other_reader, other_writer = await self.connect()
             reply = await self.send_message(other_reader, other_writer, "Subject: third\r\n\r\nbody")
             self.assertTrue(reply[0].startswith("250"), reply)
-            self.assertFalse(hook.released.is_set())
             self.assertIn(b"Subject: third\r\n", self.log.read_bytes())
+            # One at a time: the first is with the server, the other two wait
+            # their turn. Each was queued before its 250, so this is settled
+            # by now, and a sender that sent them all at once would show the
+            # server three requests and an empty queue.
+            self.assertEqual(len(hook.requests), 1)
+            self.assertEqual(sender.queue.qsize(), 2)
 
             # Let it answer. All three go out, in the order they were logged.
             hook.released.set()
@@ -1210,7 +1234,8 @@ class RecordingServer:
         threading.Thread(
             target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
         ).start()
-        # Cleanups run last first: release anything stalled, then stop.
+        # Cleanups run last first: release anything stalled, then stop the
+        # server. sender() adds its own stop, and a second release after it.
         case.addCleanup(self.server.server_close)
         case.addCleanup(self.server.shutdown)
         case.addCleanup(self.released.set)
@@ -1221,7 +1246,10 @@ class RecordingServer:
     def sender(self, **kwargs):
         sender = smtp_sink.WebhookSender(self.url, **kwargs)
         sender.start()
+        # Stopped after anything stalled is released, not before: joined
+        # while its request is still held, it waits out its whole timeout.
         self.case.addCleanup(sender.stop, REPLY_TIMEOUT)
+        self.case.addCleanup(self.released.set)
         return sender
 
 
@@ -1315,14 +1343,16 @@ class WebhookPayloadTests(unittest.TestCase):
     def test_an_attached_message_or_named_file_is_not_the_text(self):
         # An email forwarded as an attachment has text parts of its own, and
         # a text file sent inline still has a filename. Neither is what the
-        # sender wrote, and both are attachments.
+        # sender wrote, and both are attachments. Both come before the real
+        # text on purpose: a walker that went into the attached message, or
+        # took a named file for the text, would find theirs first.
         body = (
             'Subject: outer\r\nContent-Type: multipart/mixed; boundary="M"\r\n\r\n'
-            "--M\r\nContent-Type: text/plain\r\n\r\nthe outer words\r\n"
-            "--M\r\nContent-Type: text/html\r\n"
-            'Content-Disposition: inline; filename="page.html"\r\n\r\n<p>a file</p>\r\n'
             "--M\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\n"
             "Subject: inner\r\n\r\nthe inner words\r\n"
+            "--M\r\nContent-Type: text/html\r\n"
+            'Content-Disposition: inline; filename="page.html"\r\n\r\n<p>a file</p>\r\n'
+            "--M\r\nContent-Type: text/plain\r\n\r\nthe outer words\r\n"
             "--M--\r\n"
         ).encode("ascii")
         message = smtp_sink.webhook_payload(delivery(body))["message"]
@@ -1330,10 +1360,10 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertIsNone(message["html"])
         self.assertEqual(
             [(a["filename"], a["content_type"], a["disposition"]) for a in message["attachments"]],
-            [("page.html", "text/html", "inline"), (None, "message/rfc822", "attachment")],
+            [(None, "message/rfc822", "attachment"), ("page.html", "text/html", "inline")],
         )
-        self.assertEqual(message["attachments"][0]["size"], len(b"<p>a file</p>"))
-        self.assertGreater(message["attachments"][1]["size"], len(b"the inner words"))
+        self.assertGreater(message["attachments"][0]["size"], len(b"the inner words"))
+        self.assertEqual(message["attachments"][1]["size"], len(b"<p>a file</p>"))
 
     def test_raw_is_the_message_byte_for_byte(self):
         body = b"Subject: s\r\n\r\nlatin-1 \xe9 and a bare\nline feed\r\n"
@@ -1606,6 +1636,43 @@ class WebhookSenderTests(unittest.TestCase):
         unchecked = smtp_sink.WebhookSender("https://hooks.example.test/", verify=False).context
         self.assertEqual(unchecked.verify_mode, ssl.CERT_NONE)
         self.assertFalse(unchecked.check_hostname)
+
+    def test_a_delivery_gives_its_room_in_the_queue_back(self):
+        hook = RecordingServer(self)
+        with (
+            mock.patch.object(smtp_sink, "WEBHOOK_QUEUE_SIZE", 1),
+            mock.patch.object(smtp_sink, "WEBHOOK_QUEUE_BYTES", 100),
+        ):
+            sender = self.send(hook, delivery(b"x" * 80))
+            self.assertEqual((sender.waiting, sender.waiting_bytes), (0, 0))
+            # Fits only if the first gave back both its place and its bytes.
+            self.assertTrue(sender.submit(delivery(b"y" * 80)))
+            self.assertTrue(sender.wait_idle(REPLY_TIMEOUT))
+        self.assertEqual(len(hook.requests), 2)
+
+    def test_the_certificate_setting_reaches_the_connection(self):
+        for verify in (True, False):
+            with self.subTest(verify=verify):
+                sender = smtp_sink.WebhookSender("https://hooks.example.test/x", verify=verify)
+                answer = mock.Mock(status=204, reason="No Content")
+                answer.read.return_value = b""
+                with mock.patch.object(http.client, "HTTPSConnection") as connection:
+                    connection.return_value.getresponse.return_value = answer
+                    sender.deliver(delivery())
+                connection.assert_called_once_with(
+                    "hooks.example.test", 443, timeout=smtp_sink.WEBHOOK_TIMEOUT, context=sender.context
+                )
+                expected = ssl.CERT_REQUIRED if verify else ssl.CERT_NONE
+                self.assertEqual(connection.call_args.kwargs["context"].verify_mode, expected)
+
+    def test_a_given_host_or_accept_encoding_is_sent_once(self):
+        # http.client adds both of its own unless told not to, and a second
+        # Host header is one a server may well refuse.
+        hook = RecordingServer(self)
+        self.send(hook, headers=[("Host", "hooks.example.test"), ("Accept-Encoding", "gzip")])
+        request = hook.requests[0]
+        self.assertEqual(request.header("Host"), ["hooks.example.test"])
+        self.assertEqual(request.header("Accept-Encoding"), ["gzip"])
 
     def test_the_queue_is_capped_by_count_and_by_bytes(self):
         sender = smtp_sink.WebhookSender("http://192.0.2.1/")  # never started
