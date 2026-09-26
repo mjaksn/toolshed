@@ -78,7 +78,11 @@ is refused with a 503.
 There is no authentication and no rate limiting, and anything that connects
 gets its message logged. This is fine on a network you control and is an open
 relay-shaped hole on one you do not, so bind it to a LAN address and leave it
-off the public internet. That is why `--bind` has to be given. A message larger
+off the public internet. That is why `--bind` has to be given. A transaction
+takes at most 100 recipients, and the next draws a 452 while those already
+taken still get the message. An address longer than 256 characters as
+recorded, escapes included, draws a 501. Both limits keep one connection from
+holding an envelope of unbounded size in memory until DATA. A message larger
 than 10 MB, counted in octets as the `SIZE` the server advertises promises, is
 refused with a 552 and the connection carries on. A single line of any length
 up to that limit is taken, whatever RFC 5321 says about a thousand octets,

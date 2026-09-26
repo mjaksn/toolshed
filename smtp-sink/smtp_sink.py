@@ -39,6 +39,16 @@ IDLE_TIMEOUT = 300  # seconds a client may sit silent before we hang up
 # been refused anyway.
 LINE_LIMIT = MAX_MESSAGE_BYTES + 2
 
+# The envelope is held in memory until DATA, and a command line may be as long
+# as LINE_LIMIT, so without these one connection could pile up RCPT after RCPT
+# of 10 MB apiece. A hundred recipients is the least RFC 5321 lets a server
+# refuse at (4.5.3.1.8), and further ones draw a 452 while the transaction
+# carries on with those already taken. The path limit is RFC 5321's 256 octets
+# (4.5.3.1.3), applied to the address as stored, escapes included, because what
+# it protects is memory rather than the letter of the RFC.
+MAX_RECIPIENTS = 100
+MAX_PATH = 256
+
 # How many lines can wait for syslog. Each is at most `--syslog-max`
 # characters, 2000 by default, so a full queue is a few megabytes. It holds
 # finished lines rather than the messages they came from, which can be 10 MB
@@ -377,7 +387,14 @@ async def handle_client(reader, writer, args):
                 await send(f"250-SIZE {MAX_MESSAGE_BYTES}")
                 await send("250 8BITMIME")
             elif verb == "MAIL":
-                mail_from = envelope_path(arg)
+                path = envelope_path(arg)
+                if len(path) > MAX_PATH:
+                    # The client meant to start a transaction, so an older one
+                    # is not left standing for its DATA to be logged under.
+                    mail_from, rcpts = None, []
+                    await send("501 Path too long")
+                    continue
+                mail_from = path
                 rcpts = []
                 await send("250 OK")
             elif verb == "RCPT":
@@ -387,7 +404,14 @@ async def handle_client(reader, writer, args):
                 if mail_from is None:
                     await send("503 Need MAIL first")
                     continue
-                rcpts.append(envelope_path(arg))
+                path = envelope_path(arg)
+                if len(path) > MAX_PATH:
+                    await send("501 Path too long")
+                    continue
+                if len(rcpts) >= MAX_RECIPIENTS:
+                    await send("452 Too many recipients")
+                    continue
+                rcpts.append(path)
                 await send("250 OK")
             elif verb == "DATA":
                 if mail_from is None or not rcpts:
