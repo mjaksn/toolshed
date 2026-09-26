@@ -934,7 +934,9 @@ class WebhookSender:
                 # Escaped, because the text can come from the webhook: a
                 # status line or reason with a carriage return or a terminal
                 # escape in it would otherwise reach stderr as it came.
-                print(f"[{delivery.peer[0]}] webhook {self.shown} failed, not sent;"
+                # "Failed" and not "not sent": an error status means the
+                # request did arrive, and may even have been acted on.
+                print(f"[{delivery.peer[0]}] webhook {self.shown} delivery failed;"
                       f" the message is in the log file: {visible(str(exc))}", file=sys.stderr)
             finally:
                 with self.idle:

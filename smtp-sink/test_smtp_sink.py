@@ -2017,7 +2017,7 @@ class WebhookSenderTests(unittest.TestCase):
             self.send(hook)
         self.assertEqual(len(hook.requests), 1)
         self.assertIn("timed out", self.err.getvalue())
-        self.assertIn("failed, not sent", self.err.getvalue())
+        self.assertIn("delivery failed", self.err.getvalue())
 
     def test_the_reply_is_read_only_so_far(self):
         # Nothing in it is used, so a webhook answering with gigabytes must
