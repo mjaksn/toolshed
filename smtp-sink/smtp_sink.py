@@ -824,8 +824,9 @@ async def handle_client(reader, writer, args):
 
     mail_from = None
     rcpts = []
-    # The name the client gave in HELO or EHLO, for the webhook. It belongs to
-    # the session rather than a transaction, so RSET leaves it alone.
+    # The name the client gave in HELO or EHLO, for the webhook, or None for
+    # a greeting with no name. It belongs to the session rather than a
+    # transaction, so RSET leaves it alone.
     helo = None
 
     try:
@@ -842,11 +843,11 @@ async def handle_client(reader, writer, args):
             # envelope instead of refusing it.
             if verb == "HELO":
                 mail_from, rcpts = None, []
-                helo = visible(arg[:MAX_HELO])
+                helo = visible(arg[:MAX_HELO]) or None
                 await send(f"250 {HOSTNAME}")
             elif verb == "EHLO":
                 mail_from, rcpts = None, []
-                helo = visible(arg[:MAX_HELO])
+                helo = visible(arg[:MAX_HELO]) or None
                 await send(f"250-{HOSTNAME}")
                 await send(f"250-SIZE {MAX_MESSAGE_BYTES}")
                 await send("250 8BITMIME")

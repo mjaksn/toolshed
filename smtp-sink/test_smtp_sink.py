@@ -1073,6 +1073,21 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         # The same moment as the log file records, so the two can be matched.
         self.assertIn(f"Received: {payload['received']}\n", self.log.read_bytes().decode("utf-8"))
 
+    async def test_a_greeting_with_no_name_leaves_helo_null(self):
+        queued = []
+        webhook = mock.Mock(submit=lambda delivery: queued.append(delivery) or True)
+        with mock.patch.object(smtp_sink, "webhook", webhook):
+            reader, writer = await self.connect()
+            await self.command(reader, writer, "EHLO")
+            await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+            await self.command(reader, writer, "RCPT TO:<b@example.test>")
+            await self.command(reader, writer, "DATA")
+            writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+            await writer.drain()
+            self.assertTrue((await read_reply(reader))[0].startswith("250"))
+        self.assertIsNone(queued[0].helo)
+        self.assertIsNone(smtp_sink.webhook_payload(queued[0])["helo"])
+
     async def test_a_stalled_webhook_holds_up_nothing(self):
         # A webhook that takes the request and never answers. The client gets
         # its 250, and the same connection and a new one both carry on, all
