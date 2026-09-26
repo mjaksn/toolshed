@@ -1074,6 +1074,20 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         # The same moment as the log file records, so the two can be matched.
         self.assertIn(f"Received: {payload['received']}\n", self.log.read_bytes().decode("utf-8"))
 
+    async def test_helo_records_the_name_as_ehlo_does(self):
+        queued = []
+        webhook = mock.Mock(submit=lambda delivery: queued.append(delivery) or True)
+        with mock.patch.object(smtp_sink, "webhook", webhook):
+            reader, writer = await self.connect()
+            await self.command(reader, writer, "HELO old.example.test")
+            await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+            await self.command(reader, writer, "RCPT TO:<b@example.test>")
+            await self.command(reader, writer, "DATA")
+            writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+            await writer.drain()
+            self.assertTrue((await read_reply(reader))[0].startswith("250"))
+        self.assertEqual(queued[0].helo, "old.example.test")
+
     async def test_a_greeting_with_no_name_leaves_helo_null(self):
         queued = []
         webhook = mock.Mock(submit=lambda delivery: queued.append(delivery) or True)
@@ -1596,6 +1610,13 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertTrue(long_value.startswith("éaaa"))
         self.assertTrue(long_value.endswith("..."))
         self.assertLess(len(long_value), smtp_sink.MAX_HEADER_TEXT)
+
+    def test_a_long_raw_8_bit_header_is_cut_like_any_other(self):
+        # No ASCII in it at all, so header_text never sees it and only
+        # header_value's own cut stands between it and the JSON.
+        body = ("X-Raw: " + "é" * 10_000 + "\r\n\r\nbody\r\n").encode("utf-8")
+        value = smtp_sink.webhook_payload(delivery(body))["message"]["headers"][0]["value"]
+        self.assertEqual(value, "é" * smtp_sink.MAX_HEADER_TEXT + "...")
 
     def test_an_encoded_word_cannot_put_a_lone_surrogate_in_the_json(self):
         # unicode-escape decodes `\ud800` to the surrogate itself, which a

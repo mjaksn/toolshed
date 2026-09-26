@@ -570,8 +570,13 @@ def header_value(value):
     value = FOLD.sub("", value)
     if not any("\udc80" <= c <= "\udcff" for c in value):
         return clean(header_text(value))
-    cut = len(value) > MAX_HEADER_TEXT
-    text = clean(value[:MAX_HEADER_TEXT])
+    # Read as text first and cut after, so the limit counts characters, as it
+    # does everywhere else, rather than the bytes they arrived as, and never
+    # falls in the middle of one. Reading it is linear in the length; only the
+    # decoding below needs the limit.
+    text = clean(value)
+    cut = len(text) > MAX_HEADER_TEXT
+    text = text[:MAX_HEADER_TEXT]
     # Cleaned again once decoded: an encoded word can name a codec such as
     # unicode-escape, which turns `\ud800` into the lone surrogate itself.
     decoded = clean("".join(
