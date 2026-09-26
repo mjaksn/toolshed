@@ -438,7 +438,13 @@ def part_text(part):
     payload = part.get_payload(decode=True)
     if payload is None:  # nothing to decode, so take it as it came
         return part.get_payload() or ""
-    charset = part.get_content_charset() or "utf-8"
+    try:
+        charset = part.get_content_charset() or "utf-8"
+    # The charset given both whole and in RFC 2231 pieces, as in
+    # `charset*=utf-8''x; charset*0=a`, which the email package's own sort of
+    # the pieces trips over.
+    except (TypeError, ValueError):
+        charset = "utf-8"
     try:
         return payload.decode(charset, "replace")
     # A charset name Python does not know, a codec such as idna that refuses

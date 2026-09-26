@@ -1425,19 +1425,25 @@ class WebhookPayloadTests(unittest.TestCase):
 
     def test_one_malformed_part_costs_its_field_not_the_delivery(self):
         # Each of these once raised out of webhook_payload, and the receiver
-        # got nothing, raw message and envelope included.
+        # got nothing, raw message and envelope included. Now even a message
+        # that cannot be read at all goes out, so what is checked here is
+        # that these are read, not merely sent.
         cases = {
             "a NUL in a text part's charset": (
                 b'Content-Type: text/plain; charset="utf\x008"\r\n\r\nhi\r\n'),
+            "a charset given both whole and in pieces": (
+                b"Content-Type: text/plain; charset*=utf-8''x; charset*0=a\r\n\r\nhi\r\n"),
             "an attached message nested four hundred deep": (
                 b"Content-Type: message/rfc822\r\n\r\n" * 400 + b"x"),
         }
         for name, body in cases.items():
             with self.subTest(name):
-                payload = smtp_sink.webhook_payload(delivery(body))
-                self.assertEqual(base64.b64decode(payload["message"]["raw"]), body)
-        text = smtp_sink.webhook_payload(delivery(cases["a NUL in a text part's charset"]))
-        self.assertEqual(text["message"]["text"], "hi\r\n")
+                message = smtp_sink.webhook_payload(delivery(body))["message"]
+                self.assertIsNone(message["parse_error"])
+                self.assertFalse(message["incomplete"])
+                self.assertEqual(base64.b64decode(message["raw"]), body)
+                if name != "an attached message nested four hundred deep":
+                    self.assertEqual(message["text"], "hi\r\n")
 
     def test_a_charset_name_that_is_not_ascii_leaves_the_header_as_it_came(self):
         self.assertEqual(smtp_sink.header_text("=?utf-�?q?a?="), "=?utf-�?q?a?=")
