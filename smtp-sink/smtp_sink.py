@@ -464,10 +464,17 @@ async def handle_client(reader, writer, args):
                     await send("250 OK: queued")
                     if syslog is not None:
                         # Building the line parses the message, which is CPU
-                        # work up to the size limit, so it runs in a thread;
-                        # sending it is left to the forwarder. Either way this
-                        # connection goes straight back to reading commands,
-                        # whatever state the syslog server is in.
+                        # work up to the size limit, so it runs in a thread,
+                        # and sending it is left to the forwarder. This
+                        # connection waits for its own message to be parsed
+                        # before reading its next command, and that is on
+                        # purpose: it keeps each connection to one message in
+                        # flight, where a parse handed off to run on its own
+                        # would let a fast client queue 10 MB bodies without
+                        # limit. The wait is CPU time bounded by the size
+                        # limit and comes after the 250, so it never depends
+                        # on the syslog server and never lasts long enough for
+                        # the client to send the message again.
                         # A message that cannot be summarised costs its forward,
                         # never the connection the client already heard 250 on.
                         try:

@@ -43,10 +43,12 @@ space or a quote of its own, so in those fields a quote is written as `\x22`
 and a space as `\x20`, in the same style as the control characters.
 
 The client gets its 250 once the message is in the file, before anything is
-forwarded, and its connection goes straight back to reading commands. The
-syslog lines queue for a single sender, which sends them in order, so a syslog
-server that is slow or has gone away never holds up the mail, or leaves a
-client waiting long enough to send a message twice. The queue holds 1000
+forwarded. Its connection then waits only while the message is parsed for the
+syslog line, CPU time bounded by the size limit, which keeps each connection
+to one message in flight. The syslog lines queue for a single sender, which
+sends them in order, so a syslog server that is slow or has gone away never
+holds up the mail, or leaves a client waiting long enough to send a message
+twice. The queue holds 1000
 lines; while it is full, a message still goes in the file, and its forward is
 dropped with a line on stderr.
 
