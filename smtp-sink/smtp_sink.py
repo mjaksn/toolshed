@@ -524,13 +524,17 @@ def content_parts(msg):
     `walk` goes into an attached message as well, since a message/rfc822 part
     holds a message of its own, and then that message's parts pass for the
     outer one's: its text becomes the text, and the attachment itself is lost.
-    Here an attached message is one part, like any other attachment.
+    Here an attached message is one part, like any other attachment, and so
+    is a multipart part that is itself attached, marked so or given a name:
+    what is inside it belongs to the attachment, not to the message. The
+    message itself is walked into whatever its headers say.
     """
     found = []
     pending = [msg]
     while pending:
         part = pending.pop()
-        if part.get_content_maintype() == "multipart" and part.is_multipart():
+        container = part.get_content_maintype() == "multipart" and part.is_multipart()
+        if container and (part is msg or not is_attachment(part)):
             pending.extend(reversed(part.get_payload()))
         else:
             found.append(part)

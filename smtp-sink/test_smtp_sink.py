@@ -1365,6 +1365,26 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertGreater(message["attachments"][0]["size"], len(b"the inner words"))
         self.assertEqual(message["attachments"][1]["size"], len(b"<p>a file</p>"))
 
+    def test_an_attached_multipart_part_is_one_attachment(self):
+        # Its text belongs to the attachment. Placed first, so a walker that
+        # went into it would find that text before the real one.
+        body = (
+            'Content-Type: multipart/mixed; boundary="M"\r\n\r\n'
+            '--M\r\nContent-Type: multipart/alternative; boundary="A"\r\n'
+            'Content-Disposition: attachment; filename="bundle"\r\n\r\n'
+            "--A\r\nContent-Type: text/plain\r\n\r\ninside the attachment\r\n"
+            "--A\r\nContent-Type: text/html\r\n\r\n<p>inside</p>\r\n--A--\r\n"
+            "--M\r\nContent-Type: text/plain\r\n\r\nthe real text\r\n"
+            "--M--\r\n"
+        ).encode("ascii")
+        message = smtp_sink.webhook_payload(delivery(body))["message"]
+        self.assertEqual(message["text"], "the real text")
+        self.assertIsNone(message["html"])
+        self.assertEqual(
+            [(a["filename"], a["content_type"]) for a in message["attachments"]],
+            [("bundle", "multipart/alternative")],
+        )
+
     def test_raw_is_the_message_byte_for_byte(self):
         body = b"Subject: s\r\n\r\nlatin-1 \xe9 and a bare\nline feed\r\n"
         raw = smtp_sink.webhook_payload(delivery(body))["message"]["raw"]
