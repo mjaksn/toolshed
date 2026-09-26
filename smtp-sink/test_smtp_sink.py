@@ -1334,6 +1334,20 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual(message["subject"], "caf� �")
         self.assertEqual(message["headers"][1]["value"], "�")
 
+    def test_a_folded_header_is_unfolded_however_it_is_encoded(self):
+        body = (
+            b"Subject: a subject long enough\r\n\tto be folded\r\n"
+            b"X-Encoded: =?utf-8?q?a_subject_long_enough?=\r\n =?utf-8?q?to_be_folded?=\r\n"
+            b"X-Bare-LF: folded\n with a bare line feed\n"
+            b"\r\nbody\r\n"
+        )
+        message = smtp_sink.webhook_payload(delivery(body))["message"]
+        self.assertEqual(message["subject"], "a subject long enough\tto be folded")
+        values = [h["value"] for h in message["headers"]]
+        self.assertEqual(values[1], "a subject long enoughto be folded")
+        self.assertEqual(values[2], "folded with a bare line feed")
+        self.assertFalse(any("\n" in v for v in values))
+
     def test_raw_utf_8_in_a_header_survives(self):
         # Sent as raw 8-bit rather than as encoded words. Only the byte that
         # is not UTF-8 is replaced; the rest reads as it was meant.

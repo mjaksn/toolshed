@@ -99,6 +99,11 @@ WEBHOOK_TIMEOUT = 10
 WEBHOOK_QUEUE_SIZE = 1000
 WEBHOOK_QUEUE_BYTES = 64 * 1024 * 1024
 
+# A line break that folds a header onto the next line, which starts with a
+# space or tab (RFC 5322, 2.2.3). A bare LF counts as well as CRLF, since the
+# sink keeps whatever line endings a message arrived with.
+FOLD = re.compile(r"\r?\n(?=[ \t])")
+
 # RFC 9110's token, the characters a header name may be made of.
 HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
@@ -439,7 +444,13 @@ def header_value(value):
     bytes, as surrogates, and `clean` reads them as UTF-8, which is what a
     device sending raw 8-bit nearly always means, replacing only what is not.
     Such a value has no encoded words to decode: those are ASCII by definition.
+
+    A value folded across lines is unfolded first, as RFC 5322 has it: each
+    line break before a space or tab goes, the space stays. Decoding encoded
+    words unfolds as a side effect, so without this the same subject arrived in
+    two shapes depending on how it was encoded.
     """
+    value = FOLD.sub("", value)
     if any("\udc80" <= c <= "\udcff" for c in value):
         return clean(value)
     return clean(header_text(value))
