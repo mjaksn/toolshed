@@ -430,6 +430,7 @@ class SyslogAddressTests(unittest.TestCase):
             # IPv6: bare means the default port, brackets allow one.
             "::1": ("::1", 514),
             "fe80::5": ("fe80::5", 514),
+            "fe80::5%eth0": ("fe80::5%eth0", 514),
             "[::1]": ("::1", 514),
             "[::1]:1514": ("::1", 1514),
         }
@@ -438,7 +439,13 @@ class SyslogAddressTests(unittest.TestCase):
                 self.assertEqual(smtp_sink.syslog_address(text), expected)
 
     def test_refuses_what_is_not_an_address(self):
-        for text in ("host:abc", "host:0", "host:70000", "[::1", "[::1]x", ":514", "[]:514"):
+        refused = (
+            "host:abc", "host:0", "host:70000", "[::1", "[::1]x", ":514", "[]:514",
+            # A colon with no port after it, and a stray one that would
+            # otherwise pass for an IPv6 address.
+            "host:", "[::1]:", "host:514:", "a:b:c",
+        )
+        for text in refused:
             with self.subTest(text=text), self.assertRaises(argparse.ArgumentTypeError):
                 smtp_sink.syslog_address(text)
 

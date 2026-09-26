@@ -15,6 +15,7 @@ Usage:
 import argparse
 import asyncio
 import datetime
+import ipaddress
 import logging
 import logging.handlers
 import socket
@@ -490,19 +491,32 @@ def syslog_address(text):
     An IPv6 address is full of colons, so one with a port goes in brackets, as
     in a URL: `[::1]:514`, or `[::1]` for the default port. A bare address with
     more than one colon, such as `::1`, can only be IPv6 without a port, and is
-    taken that way. Anything else is `HOST` or `HOST:PORT`.
+    refused unless it parses as one, so a typo such as `host:514:` is caught
+    here. Anything else is `HOST` or `HOST:PORT`.
+
+    A colon with nothing after it is refused rather than read as the default
+    port. A mistyped address would otherwise start the sink with every forward
+    failing, and those failures are retried quietly rather than stopping it.
     """
     if text.startswith("["):
         host, bracket, rest = text[1:].partition("]")
         if not bracket or (rest and not rest.startswith(":")):
             raise argparse.ArgumentTypeError(f"expected [HOST] or [HOST]:PORT, got {text!r}")
-        port = rest[1:]
+        colon, port = rest[:1], rest[1:]
     elif text.count(":") > 1:
-        host, port = text, ""
+        try:
+            ipaddress.IPv6Address(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"not an IPv6 address, and a port needs brackets: {text!r}"
+            ) from None
+        host, colon, port = text, "", ""
     else:
-        host, _, port = text.partition(":")
+        host, colon, port = text.partition(":")
     if not host:
         raise argparse.ArgumentTypeError(f"no host in {text!r}")
+    if colon and not port:
+        raise argparse.ArgumentTypeError(f"no port after the colon in {text!r}")
     if not port:
         return host, 514
     if not port.isdigit() or not 0 < int(port) < 65536:
