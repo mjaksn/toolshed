@@ -174,7 +174,8 @@ shortened:
 
 A header sent as raw 8-bit text rather than as encoded words names no
 charset, so it is read as UTF-8, which is what a device sending one nearly
-always means. Any bytes in it that are not UTF-8 arrive as U+FFFD replacement
+always means, and any encoded words beside that text are decoded as in any
+other header. Any bytes in it that are not UTF-8 arrive as U+FFFD replacement
 characters there, and are intact in `raw`. The JSON is ASCII throughout,
 anything else written as a `\u` escape.
 

@@ -1445,6 +1445,18 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual(message["subject"], "café 15°C �")
         self.assertEqual(message["headers"][1], {"name": "X-Site", "value": "München"})
 
+    def test_raw_text_and_encoded_words_in_one_header_both_read(self):
+        # decode_header gives up on a value holding anything but ASCII, so
+        # encoded words beside raw 8-bit text were left encoded.
+        body = ("Subject: café =?utf-8?q?M=C3=BCnchen?= ok\r\n"
+                "X-Long: é" + "=?utf-8?q?a?= " * 1000 + "\r\n\r\nbody\r\n").encode("utf-8")
+        message = smtp_sink.webhook_payload(delivery(body))["message"]
+        self.assertEqual(message["subject"], "café München ok")
+        long_value = message["headers"][1]["value"]
+        self.assertTrue(long_value.startswith("éaaa"))
+        self.assertTrue(long_value.endswith("..."))
+        self.assertLess(len(long_value), smtp_sink.MAX_HEADER_TEXT)
+
     def test_an_escaped_address_stays_escaped(self):
         payload = smtp_sink.webhook_payload(delivery(mail_from="<a\\r@example.test>"))
         self.assertEqual(payload["envelope"]["from"], "<a\\r@example.test>")

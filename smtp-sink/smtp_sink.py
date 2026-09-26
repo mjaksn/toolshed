@@ -113,6 +113,10 @@ WEBHOOK_QUEUE_BYTES = 64 * 1024 * 1024
 # still in the log file and in the webhook's `raw`.
 MAX_HEADER_TEXT = 4096
 
+# A stretch of a header that is not ASCII, captured so that splitting on it
+# keeps it; see header_value.
+NON_ASCII_RUN = re.compile(r"([^\x00-\x7f]+)")
+
 # A line break that folds a header onto the next line, which starts with a
 # space or tab (RFC 5322, 2.2.3). A bare LF counts as well as CRLF, since the
 # sink keeps whatever line endings a message arrived with.
@@ -469,7 +473,12 @@ def header_value(value):
     byte replaced already, valid UTF-8 included. The raw value still holds the
     bytes, as surrogates, and `clean` reads them as UTF-8, which is what a
     device sending raw 8-bit nearly always means, replacing only what is not.
-    Such a value has no encoded words to decode: those are ASCII by definition.
+
+    Such a value can still hold encoded words beside the raw text, and those
+    are ASCII by definition, but `decode_header` gives up on a value holding
+    anything else and leaves all of it encoded. So once it is text, each run
+    of ASCII in it is decoded on its own and the rest is left as it is, after
+    the same cut to MAX_HEADER_TEXT `header_text` makes.
 
     A value folded across lines is unfolded first, as RFC 5322 has it: each
     line break before a space or tab goes, the space stays. Decoding encoded
@@ -477,9 +486,28 @@ def header_value(value):
     two shapes depending on how it was encoded.
     """
     value = FOLD.sub("", value)
-    if any("\udc80" <= c <= "\udcff" for c in value):
-        return clean(value)
-    return clean(header_text(value))
+    if not any("\udc80" <= c <= "\udcff" for c in value):
+        return clean(header_text(value))
+    cut = len(value) > MAX_HEADER_TEXT
+    text = clean(value[:MAX_HEADER_TEXT])
+    decoded = "".join(
+        ascii_run_text(run) if run.isascii() else run
+        for run in NON_ASCII_RUN.split(text)
+    )
+    return decoded + "..." if cut else decoded
+
+
+def ascii_run_text(run):
+    """A run of ASCII from a header, its encoded words decoded, its edges kept.
+
+    `decode_header` drops the space at either end of what it is given, and
+    here that space is what separates the run from the raw text beside it.
+    """
+    core = run.strip()
+    if not core:
+        return run
+    start = run.index(core)
+    return run[:start] + header_text(core) + run[start + len(core):]
 
 
 def decoded_header(msg, name):
