@@ -132,7 +132,8 @@ It installs, reinstalls, restarts and removes real services, and checks what
 they end up running: the user, the directory, and the arguments and
 environment the program receives, compared with the ones given. It also
 checks every refusal described above. Every service it creates is named
-`es-check-something` and is removed when it finishes, pass or fail. The
+`es-check-something` and is removed when it finishes, pass or fail, and it
+will not start while any unit by such a name exists already. The
 `--all` test is skipped on a machine that has services of its own from
 `install.sh`, since `--all` would take those too.
 

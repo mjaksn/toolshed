@@ -17,6 +17,14 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 cd -- "$(dirname -- "$0")" || exit 1
+# The cleanup removes every es-check-* unit, so none may be here beforehand.
+clashes=$(systemctl list-unit-files --no-legend 'es-check-*' 2>/dev/null
+          ls /etc/systemd/system/es-check-* 2>/dev/null)
+if [[ -n $clashes ]]; then
+    echo "check.sh: es-check-* units already exist, and the cleanup would remove them:" >&2
+    echo "$clashes" >&2
+    exit 1
+fi
 # Under sudo this names whoever ran it, and install.sh would run every service
 # as them. Each test says which user it wants instead.
 unset SUDO_USER
