@@ -446,6 +446,11 @@ class BoundedMessage(Message):
             return super().get(name, failobj)
         for key, value in self.raw_items():
             if key.lower() == name.lower():
+                # Cut before anything walks it, since this runs on every read
+                # of the header, several a part. Four bytes to a character at
+                # most, so this still leaves MAX_HEADER_TEXT characters once
+                # a raw 8-bit value is read as text.
+                value = value[: MAX_HEADER_TEXT * 4]
                 if any("\udc80" <= c <= "\udcff" for c in value):
                     value = clean(value)
                 return value[:MAX_HEADER_TEXT]

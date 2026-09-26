@@ -1579,6 +1579,17 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual(message["content_type"], "multipart/mixed")
         self.assertEqual(message["attachments"][0]["filename"], "notes.txt")
 
+    def test_a_raw_8_bit_parameter_header_is_cut_before_it_is_read(self):
+        # get runs on every read of these headers, several a part, so the
+        # whole value must not be walked each time.
+        body = ("Content-Type: text/plain; name=" + "é" * 500_000 + "\r\n\r\nx").encode("utf-8")
+        msg = smtp_sink.parse_message(body)
+        with mock.patch.object(smtp_sink, "clean", wraps=smtp_sink.clean) as read:
+            value = msg.get("Content-Type")
+        self.assertLessEqual(len(read.call_args.args[0]), smtp_sink.MAX_HEADER_TEXT * 4)
+        self.assertEqual(len(value), smtp_sink.MAX_HEADER_TEXT)
+        self.assertTrue(value.endswith("éé"))
+
     def test_a_huge_header_is_cut_before_it_is_decoded(self):
         # Decoding is quadratic in the length: a message-sized header of
         # encoded words, decoded whole, held the sender thread for hours.
