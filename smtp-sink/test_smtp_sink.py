@@ -12,7 +12,8 @@ checked against the same code path a mail client drives.
 Nothing here contacts a real syslog server. Most tests replace the module's
 `syslog` logger with a mock, which is also how the "no syslog configured" case
 is tested, since that is the module's own default. The tests for a server that
-is down open their own listener on the loopback address instead.
+is down open their own listener on the loopback address instead, except the
+one for a server that never answers, which fakes the connect timing out.
 """
 
 from __future__ import annotations
@@ -502,6 +503,31 @@ class SyslogHandlerTests(unittest.TestCase):
         self.addCleanup(conn.close)
         conn.settimeout(REPLY_TIMEOUT)
         self.assertIn(b"smtp_sink: hello", conn.recv(4096))
+
+    def test_a_tcp_socket_carries_the_timeout(self):
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        handler = smtp_sink.PatientSysLogHandler(
+            address=listener.getsockname(), socktype=socket.SOCK_STREAM
+        )
+        self.addCleanup(handler.close)
+        self.assertEqual(handler.socket.gettimeout(), smtp_sink.SYSLOG_TIMEOUT)
+
+    def test_a_connect_that_times_out_is_waited_for(self):
+        # A server dropping packets, which loopback cannot stand in for: there
+        # the kernel accepts or refuses a connect at once, never ignores it.
+        with mock.patch.object(
+            smtp_sink.socket, "create_connection", side_effect=TimeoutError("timed out")
+        ) as connect:
+            handler = smtp_sink.PatientSysLogHandler(
+                address=("192.0.2.1", 514), socktype=socket.SOCK_STREAM
+            )
+        self.addCleanup(handler.close)
+        connect.assert_called_once_with(("192.0.2.1", 514), smtp_sink.SYSLOG_TIMEOUT)
+        self.assertIsNone(handler.socket)
+        self.assertIn("syslog 192.0.2.1:514: timed out", self.err.getvalue())
 
     def test_a_failed_send_drops_the_socket_so_the_next_one_reconnects(self):
         # Connected for real, then swapped for a socket that has failed. A

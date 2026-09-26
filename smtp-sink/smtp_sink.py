@@ -64,6 +64,12 @@ MAX_ARGUMENT = 1000
 # on the network can send mail.
 FORWARD_QUEUE_SIZE = 1000
 
+# Seconds a TCP syslog connect or send may take before it counts as failed. A
+# server on the LAN answers in milliseconds, so this only ever runs out on one
+# that is dropping packets, and it bounds how long that can delay startup or
+# hold the forwarder's thread when the sink is stopped.
+SYSLOG_TIMEOUT = 5
+
 # Held while a message is appended. The writes run in worker threads, off the
 # event loop, and two messages finishing together must not interleave.
 log_lock = threading.Lock()
@@ -587,11 +593,23 @@ class PatientSysLogHandler(logging.handlers.SysLogHandler):
     socket, so every later message fails on it and it never connects again.
     Here a failed connect or send costs one line on stderr, the socket is
     dropped, and the next message tries afresh.
+
+    A TCP socket is also given SYSLOG_TIMEOUT, which the standard one only
+    learned in Python 3.14. Without it, a server that silently drops packets
+    holds the connect for as long as the system allows, which is minutes on
+    some, and the first connect happens before the sink starts listening.
     """
 
     def createSocket(self):
         try:
-            super().createSocket()
+            if self.socktype == socket.SOCK_STREAM:
+                # `create_connection` tries each address the name resolves
+                # to, IPv6 included, as the standard handler does, and leaves
+                # the timeout on the socket, so it bounds each send too.
+                self.socket = socket.create_connection(self.address, SYSLOG_TIMEOUT)
+                self.unixsocket = False
+            else:
+                super().createSocket()
         except OSError as exc:
             self.socket = None
             print(f"syslog {shown_address(self.address)}: {exc}", file=sys.stderr)
