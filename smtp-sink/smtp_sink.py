@@ -4,23 +4,33 @@ Minimal LAN-only SMTP sink.
 
 Accepts any message from any sender to any recipient, appends the raw
 message (plus a small envelope header) to a log file, and optionally
-forwards a summary (or the body too) to a syslog server. It never relays,
-authenticates, or stores mailboxes. Standard library only.
+forwards a summary (or the body too) to a syslog server and the whole
+message, as JSON, to a webhook. It never relays, authenticates, or stores
+mailboxes. Standard library only.
 
 Usage:
     python3 smtp_sink.py --bind 192.168.1.50 --port 2525 --log alerts.log \
-        --syslog 192.168.1.10 --syslog-proto udp --syslog-body
+        --syslog 192.168.1.10 --syslog-proto udp --syslog-body \
+        --webhook-url https://hooks.example.test/mail --header "X-Token: abc"
 """
 
 import argparse
 import asyncio
+import base64
 import datetime
+import http.client
 import ipaddress
+import json
 import logging
 import logging.handlers
+import queue
+import re
 import socket
+import ssl
 import sys
 import threading
+import urllib.parse
+import uuid
 from email.errors import HeaderParseError
 from email.header import decode_header, make_header
 from email.parser import BytesParser
@@ -57,6 +67,11 @@ MAX_PATH = 256
 # a few dozen, so this is roomy for any client and still cheap to walk.
 MAX_ARGUMENT = 1000
 
+# How much of the HELO or EHLO argument is kept for the webhook. It is the
+# client's name for itself, and a domain name is at most 255 octets (RFC 5321,
+# 4.5.3.1.2). Cut before it is escaped, for the same reason as MAX_ARGUMENT.
+MAX_HELO = 255
+
 # How many lines can wait for syslog. Each is at most `--syslog-max`
 # characters, 2000 by default, so a full queue is a few megabytes. It holds
 # finished lines rather than the messages they came from, which can be 10 MB
@@ -70,6 +85,30 @@ FORWARD_QUEUE_SIZE = 1000
 # hold the forwarder's thread when the sink is stopped.
 SYSLOG_TIMEOUT = 5
 
+# Seconds a webhook connect, send or read may go without progress before the
+# request counts as failed. It bounds each step rather than the whole request,
+# so a server that trickles its reply can hold the sender longer than this, but
+# only the sender: SMTP clients never wait on it.
+WEBHOOK_TIMEOUT = 10
+
+# How much can wait for the webhook. Unlike the syslog queue this holds whole
+# messages, up to 10 MB apiece, because the JSON is built from them by the
+# sender rather than by the connection that received them. So the queue is
+# capped by bytes as well as by count, and a message over either cap is still
+# logged, just not sent.
+WEBHOOK_QUEUE_SIZE = 1000
+WEBHOOK_QUEUE_BYTES = 64 * 1024 * 1024
+
+# RFC 9110's token, the characters a header name may be made of.
+HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+
+# Headers the sink works out for itself on every request. One given with
+# --header would contradict the body actually sent, or its framing.
+COMPUTED_HEADERS = {"content-length", "transfer-encoding"}
+
+# The methods --webhook-method takes. Every one but GET carries the JSON body.
+WEBHOOK_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
+
 # Held while a message is appended. The writes run in worker threads, off the
 # event loop, and two messages finishing together must not interleave.
 log_lock = threading.Lock()
@@ -77,9 +116,15 @@ log_lock = threading.Lock()
 syslog = None  # logging.Logger, set up in main() if --syslog is given
 forwards = None  # asyncio.Queue of syslog lines, set up by start_forwarder()
 forwarder = None  # the asyncio.Task draining it
+webhook = None  # WebhookSender, set up in main() if --webhook-url is given
 
 
-def write_entry(log_path, peer, mail_from, rcpts, body):
+def timestamp():
+    """Now, as the log file and the webhook both write it."""
+    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def write_entry(log_path, peer, mail_from, rcpts, body, received=None):
     """Append one message to the log file, byte for byte as it arrived.
 
     `body` is bytes and is written without being decoded, because a device is
@@ -90,11 +135,13 @@ def write_entry(log_path, peer, mail_from, rcpts, body):
 
     The envelope lines the sink adds around it end in LF while the message
     keeps its own CRLF, so the file has mixed line endings by design.
+
+    `received` is the time to record, now if not given. The handler passes
+    the one it gives the webhook, so the two records of a message agree.
     """
-    ts = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     header = (
         "=" * 78 + "\n"
-        f"Received: {ts}\n"
+        f"Received: {received or timestamp()}\n"
         f"Peer:     {peer[0]}:{peer[1]}\n"
         f"From:     {mail_from}\n"
         f"To:       {', '.join(rcpts)}\n"
@@ -350,6 +397,269 @@ async def run_forwarder():
             forwards.task_done()
 
 
+def clean(text):
+    """`text` with no lone surrogates, so it can be encoded as UTF-8.
+
+    A header sent as raw 8-bit rather than as encoded words comes out of the
+    parser holding surrogates. `json.dumps` writes those as `\\udcxx` escapes,
+    which a strict receiver refuses along with the whole request, so they are
+    flattened to replacement characters, as the syslog subject is.
+    """
+    try:
+        raw = text.encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:  # a surrogate surrogateescape did not make
+        raw = text.encode("utf-8", "replace")
+    return raw.decode("utf-8", "replace")
+
+
+def decoded_header(msg, name):
+    """One header as readable text, or None if the message has none."""
+    value = msg.get(name)
+    return None if value is None else clean(header_text(str(value)))
+
+
+def leaf_parts(msg):
+    """Every part that holds content rather than other parts."""
+    return [part for part in msg.walk() if not part.is_multipart()]
+
+
+def attachment_name(part):
+    """A part's filename, or None. A malformed RFC 2231 name is not fatal."""
+    try:
+        name = part.get_filename()
+    except (HeaderParseError, LookupError, UnicodeError, ValueError, TypeError):
+        return None
+    return None if name is None else clean(str(name))
+
+
+def first_text(msg, content_type):
+    """The first inline part of `content_type`, decoded, or None."""
+    for part in leaf_parts(msg):
+        if part.get_content_type() == content_type and part.get_content_disposition() != "attachment":
+            return clean(part_text(part))
+    return None
+
+
+def attachments(msg):
+    """What the message carries besides its text, described, not included.
+
+    A part counts when it is marked as an attachment or has a filename. Its
+    content is in `raw` with the rest of the message, so only the size is given
+    here, as decoded octets.
+    """
+    found = []
+    for part in leaf_parts(msg):
+        filename = attachment_name(part)
+        disposition = part.get_content_disposition()
+        if disposition != "attachment" and filename is None:
+            continue
+        payload = part.get_payload(decode=True)
+        found.append({
+            "filename": filename,
+            "content_type": part.get_content_type(),
+            "disposition": disposition,
+            "size": len(payload) if isinstance(payload, bytes) else 0,
+        })
+    return found
+
+
+class Delivery:
+    """One message waiting for the webhook, as the handler had it."""
+
+    def __init__(self, received, peer, helo, mail_from, rcpts, body):
+        self.received = received
+        self.peer = peer
+        self.helo = helo
+        self.mail_from = mail_from
+        self.rcpts = tuple(rcpts)
+        self.body = body
+
+
+def webhook_payload(delivery):
+    """The JSON object sent for one message.
+
+    The envelope values are the ones the log file records, control characters
+    already written out as escapes, so a carriage return in an address arrives
+    as the two characters `\\r` rather than as itself. Header values are decoded
+    from RFC 2047. `raw` is the whole message exactly as received, in base64,
+    because nothing else can carry arbitrary bytes through JSON intact, and it
+    is the only field here that loses nothing.
+    """
+    body = delivery.body
+    msg = BytesParser().parsebytes(body)
+    return {
+        "id": str(uuid.uuid4()),
+        "received": delivery.received,
+        "sink": HOSTNAME,
+        "peer": {"address": str(delivery.peer[0]), "port": delivery.peer[1]},
+        "helo": delivery.helo,
+        "envelope": {"from": delivery.mail_from, "to": list(delivery.rcpts)},
+        "message": {
+            "size": len(body),
+            "subject": decoded_header(msg, "Subject"),
+            "from": decoded_header(msg, "From"),
+            "to": decoded_header(msg, "To"),
+            "cc": decoded_header(msg, "Cc"),
+            "reply_to": decoded_header(msg, "Reply-To"),
+            "date": decoded_header(msg, "Date"),
+            "message_id": decoded_header(msg, "Message-ID"),
+            "content_type": msg.get_content_type(),
+            "headers": [
+                {"name": clean(name), "value": clean(header_text(str(value)))}
+                for name, value in msg.items()
+            ],
+            "text": first_text(msg, "text/plain"),
+            "html": first_text(msg, "text/html"),
+            "attachments": attachments(msg),
+            "raw": base64.b64encode(body).decode("ascii"),
+        },
+    }
+
+
+class WebhookError(Exception):
+    """A request the webhook answered with something other than 2xx."""
+
+
+class WebhookSender:
+    """Sends each message to the webhook from a thread of its own.
+
+    The syslog forwarder is an asyncio task that hands each line to a worker
+    thread; this is a plain thread instead, and on purpose. A webhook can be
+    slow for as long as its server likes, and a request stuck in the asyncio
+    default executor holds a worker the log file writes need too, and holds up
+    the interpreter's exit while it waits. A daemon thread of its own blocks
+    nothing but later webhook deliveries, and is abandoned at exit.
+
+    Deliveries go one at a time, in the order the messages were logged. There
+    is no retry: a failed delivery costs one line on stderr, and the message
+    is in the log file whatever happens here.
+    """
+
+    def __init__(self, url, method="POST", headers=(), verify=True):
+        parts = urllib.parse.urlsplit(url)
+        self.https = parts.scheme.lower() == "https"
+        self.host = parts.hostname
+        self.port = parts.port
+        self.target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        self.method = method
+        self.headers = list(headers)
+        # Shown at startup and in every error line. Scheme, host and port
+        # only, because plenty of webhook URLs carry their secret in the path.
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        self.shown = f"{parts.scheme.lower()}://{host}" + (f":{self.port}" if self.port else "")
+        self.context = None
+        if self.https:
+            self.context = ssl.create_default_context()
+            if not verify:
+                self.context.check_hostname = False
+                self.context.verify_mode = ssl.CERT_NONE
+        self.queue = queue.Queue()
+        self.lock = threading.Lock()
+        self.idle = threading.Condition(self.lock)
+        self.waiting = 0  # deliveries queued or being sent
+        self.waiting_bytes = 0
+        self.thread = None
+
+    def start(self):
+        self.thread = threading.Thread(target=self.run, name="webhook", daemon=True)
+        self.thread.start()
+
+    def stop(self, timeout=None):
+        """Finish what is queued and end the thread. For tests; the sink never
+        stops it, because the process exiting does."""
+        self.queue.put(None)
+        if self.thread is not None:
+            self.thread.join(timeout)
+
+    def submit(self, delivery):
+        """Queue one message, or return False if it would overfill the queue.
+
+        Never blocks: this is called from the event loop.
+        """
+        size = len(delivery.body)
+        with self.lock:
+            if (self.waiting >= WEBHOOK_QUEUE_SIZE
+                    or self.waiting_bytes + size > WEBHOOK_QUEUE_BYTES):
+                return False
+            self.waiting += 1
+            self.waiting_bytes += size
+        self.queue.put(delivery)
+        return True
+
+    def wait_idle(self, timeout=None):
+        """Whether everything queued was dealt with within `timeout`."""
+        with self.idle:
+            return self.idle.wait_for(lambda: self.waiting == 0, timeout)
+
+    def run(self):
+        while True:
+            delivery = self.queue.get()
+            if delivery is None:
+                return
+            try:
+                self.deliver(delivery)
+            except Exception as exc:
+                print(f"[{delivery.peer[0]}] webhook {self.shown} failed, not sent;"
+                      f" the message is in the log file: {exc}", file=sys.stderr)
+            finally:
+                with self.idle:
+                    self.waiting -= 1
+                    self.waiting_bytes -= len(delivery.body)
+                    self.idle.notify_all()
+
+    def request_headers(self, body):
+        """The headers for one request, the ones given with --header last.
+
+        A header given with --header replaces the sink's own of the same name,
+        so a receiver that wants some other Content-Type or User-Agent can have
+        it. A name given more than once is sent more than once, as given.
+        """
+        own = [("User-Agent", "smtp-sink")]
+        if body is not None:
+            own.append(("Content-Type", "application/json; charset=utf-8"))
+            own.append(("Content-Length", str(len(body))))
+        given = {name.lower() for name, _ in self.headers}
+        return [h for h in own if h[0].lower() not in given] + self.headers
+
+    def deliver(self, delivery):
+        """Send one request, raising if it fails or is answered with non-2xx.
+
+        http.client rather than urllib: it sends header names exactly as given,
+        where urllib rewrites `X-API-Key` as `X-api-key`, it follows no
+        redirects, and it ignores proxy settings in the environment, so the
+        request goes where --webhook-url says and nowhere else. A redirect is
+        reported as a failure with its status, which says what to fix.
+        """
+        body = None
+        if self.method != "GET":
+            body = json.dumps(webhook_payload(delivery)).encode("utf-8")
+        if self.https:
+            conn = http.client.HTTPSConnection(
+                self.host, self.port, timeout=WEBHOOK_TIMEOUT, context=self.context
+            )
+        else:
+            conn = http.client.HTTPConnection(self.host, self.port, timeout=WEBHOOK_TIMEOUT)
+        try:
+            headers = self.request_headers(body)
+            given_host = any(name.lower() == "host" for name, _ in headers)
+            given_encoding = any(name.lower() == "accept-encoding" for name, _ in headers)
+            conn.putrequest(
+                self.method, self.target,
+                skip_host=given_host, skip_accept_encoding=given_encoding,
+            )
+            for name, value in headers:
+                conn.putheader(name, value)
+            conn.endheaders(body)
+            response = conn.getresponse()
+            # Read, so the server is not cut off mid-reply, but not without
+            # limit: nothing in it is used.
+            response.read(64 * 1024)
+        finally:
+            conn.close()
+        if not 200 <= response.status < 300:
+            raise WebhookError(f"HTTP {response.status} {response.reason}")
+
+
 async def handle_client(reader, writer, args):
     peer = writer.get_extra_info("peername") or ("?", 0)
 
@@ -390,6 +700,9 @@ async def handle_client(reader, writer, args):
 
     mail_from = None
     rcpts = []
+    # The name the client gave in HELO or EHLO, for the webhook. It belongs to
+    # the session rather than a transaction, so RSET leaves it alone.
+    helo = None
 
     try:
         await send(f"220 {HOSTNAME} SMTP sink ready")
@@ -405,9 +718,11 @@ async def handle_client(reader, writer, args):
             # envelope instead of refusing it.
             if verb == "HELO":
                 mail_from, rcpts = None, []
+                helo = visible(arg[:MAX_HELO])
                 await send(f"250 {HOSTNAME}")
             elif verb == "EHLO":
                 mail_from, rcpts = None, []
+                helo = visible(arg[:MAX_HELO])
                 await send(f"250-{HOSTNAME}")
                 await send(f"250-SIZE {MAX_MESSAGE_BYTES}")
                 await send("250 8BITMIME")
@@ -465,11 +780,12 @@ async def handle_client(reader, writer, args):
                     # Rebuilt exactly as it came off the wire, dot-stuffing
                     # undone and nothing else touched, a bare LF included.
                     body = b"".join(chunks)
+                    received = timestamp()
                     try:
                         # In a thread: up to the size limit in one write would
                         # otherwise stall every other client on the loop.
                         await asyncio.to_thread(
-                            write_entry, args.log, peer, mail_from, rcpts, body
+                            write_entry, args.log, peer, mail_from, rcpts, body, received
                         )
                     except OSError as exc:
                         # A full disk or a file that cannot be opened is a
@@ -497,7 +813,10 @@ async def handle_client(reader, writer, args):
                         # limit. The wait is CPU time bounded by the size
                         # limit and comes after the 250, so it never depends
                         # on the syslog server and never lasts long enough for
-                        # the client to send the message again.
+                        # the client to send the message again. The webhook,
+                        # below, bounds the same thing differently: its queue
+                        # is capped in bytes, so its parse need not be waited
+                        # for here.
                         # A message that cannot be summarised costs its forward,
                         # never the connection the client already heard 250 on.
                         try:
@@ -514,6 +833,14 @@ async def handle_client(reader, writer, args):
                             except asyncio.QueueFull:
                                 print(f"[{peer[0]}] syslog queue full, not forwarded;"
                                       " the message is in the log file", file=sys.stderr)
+                    if webhook is not None:
+                        # Queued and left: the sender thread builds the JSON
+                        # and makes the request, so a webhook that is slow or
+                        # down never holds up this connection or any other.
+                        delivery = Delivery(received, peer, helo, mail_from, rcpts, body)
+                        if not webhook.submit(delivery):
+                            print(f"[{peer[0]}] webhook queue full, not sent;"
+                                  " the message is in the log file", file=sys.stderr)
                 mail_from, rcpts = None, []
             elif verb == "RSET":
                 mail_from, rcpts = None, []
@@ -584,6 +911,59 @@ def shown_address(address):
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
+def webhook_url(text):
+    """`--webhook-url`, checked, for argparse to call.
+
+    Everything wrong with it is caught here rather than on the first message,
+    because by then it is a line on stderr per message and a sink that looks
+    as if it is working.
+    """
+    parts = urllib.parse.urlsplit(text)
+    if parts.scheme.lower() not in ("http", "https"):
+        raise argparse.ArgumentTypeError(f"expected an http or https URL, got {text!r}")
+    if not parts.hostname:
+        raise argparse.ArgumentTypeError(f"no host in {text!r}")
+    if parts.username is not None or parts.password is not None:
+        # http.client would drop them without a word. Said this way, the
+        # credentials go where they can be sent.
+        raise argparse.ArgumentTypeError(
+            "credentials in the URL are not sent; use --header \"Authorization: ...\" instead"
+        )
+    try:
+        port = parts.port
+    except ValueError:  # out of range, or not a number
+        port = 0
+    if port == 0:
+        raise argparse.ArgumentTypeError(f"not a port number in {text!r}")
+    return text
+
+
+def header_pair(text):
+    """`--header "Name: Value"` as a (name, value) pair, for argparse to call.
+
+    A refusal names the header but never repeats its value, which is as likely
+    as not to be a token.
+    """
+    name, colon, value = text.partition(":")
+    if not colon:
+        raise argparse.ArgumentTypeError('expected "Name: Value", with a colon after the name')
+    value = value.strip()
+    if not HEADER_NAME.fullmatch(name):
+        raise argparse.ArgumentTypeError(f"not a header name: {name!r}")
+    if name.lower() in COMPUTED_HEADERS:
+        raise argparse.ArgumentTypeError(f"{name} is worked out from the body and cannot be given")
+    # A line break would start a header of its own, and http.client refuses
+    # one only when the first request is made, by which time the sink is
+    # running and the refusal is a line on stderr per message.
+    if any(c in value for c in "\r\n\0"):
+        raise argparse.ArgumentTypeError(f"the value of {name} cannot hold a line break")
+    try:
+        value.encode("latin-1")
+    except UnicodeEncodeError:
+        raise argparse.ArgumentTypeError(f"the value of {name} has to be Latin-1") from None
+    return name, value
+
+
 class PatientSysLogHandler(logging.handlers.SysLogHandler):
     """A SysLogHandler that outlasts its syslog server being down.
 
@@ -649,8 +1029,10 @@ def setup_syslog(args):
 
 
 async def main():
-    global syslog
-    ap = argparse.ArgumentParser(description="LAN-only SMTP sink that logs mail to a file and syslog")
+    global syslog, webhook
+    ap = argparse.ArgumentParser(
+        description="LAN-only SMTP sink that logs mail to a file, and optionally to syslog and a webhook"
+    )
     # No default. Anything that connects gets its message appended to a file,
     # with no authentication and no rate limit, so an address that quietly
     # meant every interface would put that on a public one too. A LAN address
@@ -667,18 +1049,44 @@ async def main():
                     help="syslog facility name, e.g. local0, mail, user")
     ap.add_argument("--syslog-body", action="store_true", help="include the message body in the syslog line, not just the summary")
     ap.add_argument("--syslog-max", type=int, default=2000, help="truncate syslog lines to this many characters")
+    ap.add_argument("--webhook-url", type=webhook_url, metavar="URL",
+                    help="send each message, as JSON, to this http or https URL")
+    ap.add_argument("--webhook-method", type=str.upper, choices=WEBHOOK_METHODS,
+                    help="request method for the webhook, POST by default; GET sends no body")
+    ap.add_argument("--webhook-disable-ssl-verify", action="store_true",
+                    help="accept any certificate from an https webhook, self-signed or not")
+    ap.add_argument("--header", type=header_pair, action="append", default=[], metavar='"NAME: VALUE"',
+                    help="add this header to every webhook request; give it once per header")
     args = ap.parse_args()
+
+    # Webhook options without a webhook are refused rather than ignored: a
+    # header nobody sends is a receiver that never authenticates the sink.
+    if not args.webhook_url:
+        given = [flag for flag, value in (
+            ("--webhook-method", args.webhook_method),
+            ("--webhook-disable-ssl-verify", args.webhook_disable_ssl_verify),
+            ("--header", args.header),
+        ) if value]
+        if given:
+            ap.error(f"{', '.join(given)} needs --webhook-url")
 
     if args.syslog:
         syslog = setup_syslog(args)
         start_forwarder()
+    if args.webhook_url:
+        webhook = WebhookSender(
+            args.webhook_url, args.webhook_method or "POST", args.header,
+            verify=not args.webhook_disable_ssl_verify,
+        )
+        webhook.start()
 
     server = await asyncio.start_server(
         lambda r, w: handle_client(r, w, args), args.bind, args.port,
         limit=LINE_LIMIT,
     )
     print(f"SMTP sink listening on {args.bind}:{args.port}, logging to {args.log}"
-          + (f", forwarding to syslog {shown_address(args.syslog)} ({args.syslog_proto})" if args.syslog else ""))
+          + (f", forwarding to syslog {shown_address(args.syslog)} ({args.syslog_proto})" if args.syslog else "")
+          + (f", sending to webhook {webhook.shown} ({webhook.method})" if args.webhook_url else ""))
     async with server:
         await server.serve_forever()
 

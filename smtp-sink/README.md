@@ -3,11 +3,13 @@
 An SMTP server for a LAN that accepts mail and never delivers it. It takes any
 message from any sender to any recipient, appends the raw message with a short
 envelope header to a log file, and optionally forwards a summary to a syslog
-server. It never relays, never authenticates, and keeps no mailboxes.
+server and the whole message, as JSON, to a webhook. It never relays, never
+authenticates, and keeps no mailboxes.
 
 The use it was written for is a device that can only report by sending mail: a
 printer, a NAS, a UPS, a switch. Point it here and the alerts land in a file
-you can read and in whatever already watches your syslog.
+you can read, in whatever already watches your syslog, and in anything that
+takes an HTTP request.
 
 Python 3.11 or later, standard library only, nothing to install. Earlier
 versions lack the hook the sink uses to survive a syslog server being down.
@@ -15,6 +17,7 @@ versions lack the hook the sink uses to survive a syslog server being down.
 ```
 python smtp_sink.py --bind 192.168.1.50 --port 2525 --log alerts.log
 python smtp_sink.py --bind 192.168.1.50 --syslog 192.168.1.10 --syslog-body
+python smtp_sink.py --bind 192.168.1.50 --webhook-url https://hooks.example.test/mail --header "X-API-Key: abc123"
 ```
 
 | Option | Effect |
@@ -27,6 +30,10 @@ python smtp_sink.py --bind 192.168.1.50 --syslog 192.168.1.10 --syslog-body
 | `--syslog-facility NAME` | Syslog facility, `local0` by default. |
 | `--syslog-body` | Put the message body in the syslog line as well as the summary. Base64 and quoted-printable are decoded, and a multipart message contributes its first text/plain part rather than its boundaries and attachments. |
 | `--syslog-max N` | Truncate syslog lines to N characters, 2000 by default. A line over the limit ends in an ellipsis, unless N leaves no room for one, in which case it is simply cut to N. A cut through the subject or body puts a closing quote after the ellipsis, so the field still ends where a parser expects. |
+| `--webhook-url URL` | Also send each message to this URL, as the JSON object described below. `http` and `https` both work. The only option the webhook needs; the three below all require it, and are refused without it. A URL that is not http or https, has no host, has a bad port, or carries a user name and password is refused at startup. Credentials go in a header instead. |
+| `--webhook-method METHOD` | `POST` by default, or `GET`, `PUT`, `PATCH` or `DELETE`, in either case. Every one but `GET` carries the JSON body; `GET` sends the request with no body at all, as a bare notification. |
+| `--webhook-disable-ssl-verify` | Accept any certificate from an `https` URL, including a self-signed one or one for another name. Without it, the certificate is checked against the system's trusted roots and the host name, and a request that fails the check is not sent. |
+| `--header "NAME: VALUE"` | Add this header to every webhook request. Give it once per header; a name given more than once is sent more than once. A header given here replaces the sink's own `User-Agent` or `Content-Type`. `Content-Length` and `Transfer-Encoding` are worked out from the body and cannot be given, and a value with a line break or a character outside Latin-1 is refused at startup. |
 
 The syslog line carries the subject as text: a device that puts a degree sign
 or an accent in one sends it as an RFC 2047 encoded word, and that is decoded
@@ -48,11 +55,11 @@ syslog line, CPU time bounded by the size limit, which keeps each connection
 to one message in flight. The syslog lines queue for a single sender, which
 sends them in order, so a syslog server that is slow or has gone away never
 holds up the mail, or leaves a client waiting long enough to send a message
-twice. The queue holds 1000
-lines; while it is full, a message still goes in the file, and its forward is
-dropped with a line on stderr.
+twice. The queue holds 1000 lines; while it is full, a message still goes in
+the file, and its forward is dropped with a line on stderr.
 
-Without `--syslog` nothing is forwarded and the log file is the only record.
+Without `--syslog` or `--webhook-url` nothing is forwarded and the log file is
+the only record.
 
 That file gets every message byte for byte as it arrived, whole, whatever the
 syslog line was trimmed down to. Nothing in it is decoded and written back
@@ -75,6 +82,86 @@ rather than passed through. A greeting, HELO or EHLO, starts the session over
 and drops any envelope in progress, as RSET does, and a RCPT before any MAIL
 is refused with a 503.
 
+## The webhook
+
+With `--webhook-url`, each message the sink logs is also sent to that URL as
+one HTTP request, with a body of `Content-Type: application/json;
+charset=utf-8` unless the method is `GET`. It looks like this, with `raw`
+shortened:
+
+```json
+{
+  "id": "6003a91b-42f4-4d3b-83ac-8df9f85a1b77",
+  "received": "2026-09-26T01:09:03-05:00",
+  "sink": "mailhost",
+  "peer": {"address": "192.168.1.20", "port": 35140},
+  "helo": "ups.lan",
+  "envelope": {"from": "<ups@nas.test>", "to": ["<ops@lan.test>"]},
+  "message": {
+    "size": 323,
+    "subject": "UPS on battery, 15°C",
+    "from": "UPS <ups@nas.test>",
+    "to": "ops@lan.test",
+    "cc": null,
+    "reply_to": null,
+    "date": "Sat, 26 Sep 2026 01:09:03 -0500",
+    "message_id": "<1@nas.test>",
+    "content_type": "multipart/mixed",
+    "headers": [
+      {"name": "Subject", "value": "UPS on battery, 15°C"},
+      {"name": "From", "value": "UPS <ups@nas.test>"}
+    ],
+    "text": "On battery.",
+    "html": null,
+    "attachments": [
+      {"filename": "report.pdf", "content_type": "application/pdf",
+       "disposition": "attachment", "size": 48213}
+    ],
+    "raw": "U3ViamVjdDogPT91dGYt..."
+  }
+}
+```
+
+| Field | What it holds |
+| --- | --- |
+| `id` | A random UUID, new for each message, for a receiver that wants to spot a duplicate. |
+| `received` | When the message was logged, the same timestamp as its `Received:` line in the log file, so the two can be matched. |
+| `sink` | The host name of the machine the sink runs on. |
+| `peer` | The address and port the message came from. |
+| `helo` | The name the client gave in HELO or EHLO, or null if it gave none. At most 255 characters are kept. |
+| `envelope` | The sender from MAIL and the recipients from RCPT, exactly as the log file records them, ESMTP parameters dropped. A control character in an address stays written out as an escape, so a carriage return arrives as the two characters `\r`. |
+| `message.size` | The message in octets, as received. |
+| `message.subject`, `from`, `to`, `cc`, `reply_to`, `date`, `message_id` | Those headers as text, RFC 2047 encoded words decoded, or null for one the message does not have. |
+| `message.content_type` | The message's own content type, such as `text/plain` or `multipart/mixed`. |
+| `message.headers` | Every header of the message, in order, decoded the same way, a repeated one listed each time. |
+| `message.text`, `message.html` | The first text/plain and first text/html part that is not an attachment, with base64 or quoted-printable undone and the part's charset decoded, or null if there is none. |
+| `message.attachments` | Each part marked as an attachment or carrying a filename: its name, content type, disposition, and decoded size. The content itself is in `raw`. |
+| `message.raw` | The whole message exactly as received, in base64. It is the one field that loses nothing, since JSON cannot carry arbitrary bytes. |
+
+A header sent as raw 8-bit text rather than as encoded words cannot be
+decoded without knowing its charset, so bytes that are not UTF-8 arrive as
+U+FFFD replacement characters there, and are intact in `raw`. The JSON is
+ASCII throughout, anything else written as a `\u` escape.
+
+Sending never holds up the mail. The client has its 250 and the message is in
+the file before the webhook hears of it, and the request is made from a thread
+of its own, so a webhook that is slow, down, or accepts the connection and
+never answers holds up no SMTP client, whether the one that sent that message
+or any other. Requests go one at a time, in the order messages were logged,
+and each connect, send and read gives up after 10 seconds without progress.
+Messages wait for the sender in a queue of at most 1000 messages and 64 MB;
+while it is full, a message still goes in the file, and is not sent, with a
+line on stderr.
+
+A request that fails, whether it cannot connect, times out, or is answered
+with anything but a 2xx status, costs one line on stderr, and the message is
+not sent again. A redirect is not followed and counts as a failure, which
+says what the URL should have been. Proxy settings in the environment are
+ignored, so the request goes where `--webhook-url` says. Once the sink is
+running, the URL it prints, at startup and on stderr, is cut to its scheme,
+host and port, since plenty of webhook URLs carry their secret in the path. A
+header value is never printed, not even in the error for one that is refused.
+
 ## A warning about where you point it
 
 There is no authentication and no rate limiting, and anything that connects
@@ -87,13 +174,19 @@ recorded, escapes included, draws a 501. Both limits keep one connection from
 holding an envelope of unbounded size in memory until DATA. A MAIL or RCPT
 argument over 1000 characters draws a 500 without being read for an address,
 since picking one out of a line of megabytes would hold up every other client
-while it happened. A message larger
-than 10 MB, counted in octets as the `SIZE` the server advertises promises, is
-refused with a 552 and the connection carries on. A single line of any length
-up to that limit is taken, whatever RFC 5321 says about a thousand octets,
-because plenty of devices ignore it; one line longer than the whole limit ends
-the connection instead of drawing the 552. A client that goes quiet for five
-minutes is hung up on.
+while it happened. A message larger than 10 MB, counted in octets as the
+`SIZE` the server advertises promises, is refused with a 552 and the
+connection carries on. A single line of any length up to that limit is taken,
+whatever RFC 5321 says about a thousand octets, because plenty of devices
+ignore it; one line longer than the whole limit ends the connection instead of
+drawing the 552. A client that goes quiet for five minutes is hung up on.
+
+A webhook at a plain `http` URL gets every message, attachments and all, in
+the clear, and so does anything between the sink and it. So does one at an
+`https` URL with `--webhook-disable-ssl-verify`, to anyone able to stand in
+for its server. Both are allowed, because a receiver on the same LAN is the
+common case, but reaching anything further off is what `https` with checked
+certificates is for.
 
 ## Tests
 
@@ -107,9 +200,12 @@ if you would rather skip the shell.
 
 The tests bind only the loopback address on a port the operating system picks,
 so they need no network and no privileges, and they send mail nowhere. Nothing
-contacts a real syslog server either. Most tests replace the module's logger
-with a mock, which is also how the case of no syslog being configured is
-covered, and the tests for a server that is down open their own listener on
-the loopback address, except the one for a server that never answers, which
-fakes the connect timing out. They take about a second, or about five on Windows, where
-a refused loopback connection takes two seconds and those tests make two.
+contacts a real syslog server or a real webhook either. Most syslog tests
+replace the module's logger with a mock, which is also how the case of no
+syslog being configured is covered, and the tests for a server that is down
+open their own listener on the loopback address, except the one for a server
+that never answers, which fakes the connect timing out. The webhook tests run
+a small HTTP server of their own on the loopback address, which records each
+request and can be told to answer with an error, a redirect, or not at all.
+They take a couple of seconds, or about six on Windows, where a refused
+loopback connection takes two seconds and the syslog tests make two.
