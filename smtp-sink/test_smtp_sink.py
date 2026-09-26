@@ -1442,6 +1442,27 @@ class WebhookPayloadTests(unittest.TestCase):
     def test_a_charset_name_that_is_not_ascii_leaves_the_header_as_it_came(self):
         self.assertEqual(smtp_sink.header_text("=?utf-�?q?a?="), "=?utf-�?q?a?=")
 
+    def test_a_parse_keeps_only_so_many_headers_and_parts(self):
+        # Two million five-byte headers were two million entries in memory
+        # and in the JSON. Past the budget they are dropped as they arrive.
+        body = (
+            "".join(f"X-H{i}: {i}\r\n" for i in range(8))
+            + 'Content-Type: multipart/mixed; boundary="B"\r\n\r\n'
+            + "".join(f"--B\r\nContent-Disposition: attachment; filename=f{i}\r\n\r\nx\r\n" for i in range(3))
+            + "--B--\r\n"
+        ).encode("ascii")
+        with (
+            mock.patch.object(smtp_sink, "MAX_PARSED_HEADERS", 11),
+            mock.patch.object(smtp_sink, "MAX_PARSED_PARTS", 2),
+        ):
+            message = smtp_sink.webhook_payload(delivery(body))["message"]
+            self.assertFalse(smtp_sink.webhook_payload(delivery())["message"]["incomplete"])
+        self.assertTrue(message["incomplete"])
+        self.assertEqual(len(message["headers"]), 9)
+        self.assertEqual(message["content_type"], "multipart/mixed")
+        self.assertEqual([a["filename"] for a in message["attachments"]], ["f0", "f1"])
+        self.assertEqual(base64.b64decode(message["raw"]), body)
+
     def test_parameter_headers_are_cut_before_they_are_split(self):
         # Splitting into parameters is quadratic, and the parser does it for
         # every multipart boundary: a message-sized Content-Type of them held

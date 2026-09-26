@@ -114,6 +114,12 @@ WEBHOOK_QUEUE_BYTES = 64 * 1024 * 1024
 # still in the log file and in the webhook's `raw`.
 MAX_HEADER_TEXT = 4096
 
+# How many header fields, and how many parts, one parse keeps, across the whole
+# message and all its parts; see BoundedMessage. A real message has a few
+# dozen headers and a handful of parts, a big one some hundreds of each.
+MAX_PARSED_HEADERS = 5000
+MAX_PARSED_PARTS = 1000
+
 # The headers the email package splits into parameters; see BoundedMessage.
 PARAM_HEADERS = {"content-type", "content-disposition"}
 
@@ -376,7 +382,32 @@ class BoundedMessage(Message):
     ordinary `get` hands back a header holding raw 8-bit text as an
     unknown-8bit Header with every high byte replaced, so a filename sent as
     raw UTF-8 lost every accented letter it had.
+
+    And each parse has a budget, `budget`, set by parse_message: once it has
+    kept MAX_PARSED_HEADERS header fields or MAX_PARSED_PARTS parts, the rest
+    are dropped as they arrive. A 10 MB message of five-byte headers otherwise
+    became two million of them held at once, a third of a gigabyte, and the
+    webhook's list of them a JSON body seven times the message. Dropping any
+    marks the budget `dropped`, which the webhook reports as `incomplete`.
     """
+
+    budget = None
+
+    def set_raw(self, name, value):
+        if self.budget is not None:
+            if self.budget["headers"] <= 0:
+                self.budget["dropped"] = True
+                return
+            self.budget["headers"] -= 1
+        super().set_raw(name, value)
+
+    def attach(self, payload):
+        if self.budget is not None:
+            if self.budget["parts"] <= 0:
+                self.budget["dropped"] = True
+                return
+            self.budget["parts"] -= 1
+        super().attach(payload)
 
     def get(self, name, failobj=None):
         if name.lower() not in PARAM_HEADERS:
@@ -390,8 +421,16 @@ class BoundedMessage(Message):
 
 
 def parse_message(body):
-    """`body` parsed into BoundedMessage parts, for syslog and the webhook."""
-    return BytesParser(_class=BoundedMessage).parsebytes(body)
+    """`body` parsed into BoundedMessage parts, for syslog and the webhook.
+
+    The message comes back with `incomplete` set when its budget ran out and
+    headers or parts were left out.
+    """
+    budget = {"headers": MAX_PARSED_HEADERS, "parts": MAX_PARSED_PARTS, "dropped": False}
+    budgeted = type("BudgetedMessage", (BoundedMessage,), {"budget": budget})
+    msg = BytesParser(_class=budgeted).parsebytes(body)
+    msg.incomplete = budget["dropped"]
+    return msg
 
 
 def part_text(part):
@@ -699,6 +738,7 @@ def webhook_payload(delivery):
             "html": first_text(msg, "text/html"),
             "attachments": attachments(msg),
             "raw": base64.b64encode(body).decode("ascii"),
+            "incomplete": msg.incomplete,
         },
     }
 
