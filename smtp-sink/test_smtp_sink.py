@@ -1501,6 +1501,16 @@ class WebhookPayloadTests(unittest.TestCase):
     def test_a_charset_name_that_is_not_ascii_leaves_the_header_as_it_came(self):
         self.assertEqual(smtp_sink.header_text("=?utf-�?q?a?="), "=?utf-�?q?a?=")
 
+    def test_a_parse_keeps_only_so_many_defects(self):
+        # The parser notes a defect for every line it cannot read as a
+        # header, straight into the list, past set_raw and attach. Three and a
+        # half million of them held over a gigabyte.
+        for name, line in (("a bare colon", b":\r\n"), ("a stray From line", b"From x\r\n")):
+            with self.subTest(name), mock.patch.object(smtp_sink, "MAX_PARSED_DEFECTS", 3):
+                msg = smtp_sink.parse_message(b"Subject: s\r\n" + line * 50 + b"\r\nbody\r\n")
+                self.assertEqual(len(msg.defects), 3)
+                self.assertTrue(msg.incomplete)
+
     def test_a_message_the_parser_cannot_take_still_goes_out(self):
         # Multiparts nested a thousand deep run the parser out of stack. The
         # envelope and raw do not need it, so they go out regardless.

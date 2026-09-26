@@ -173,7 +173,7 @@ shortened:
 | `message.text`, `message.html` | The first text/plain and first text/html part that is not an attachment, with base64 or quoted-printable undone and the part's charset decoded, or null if there is none. |
 | `message.attachments` | Each part marked as an attachment, carrying a filename whatever its disposition, or holding a message of its own, such as an email forwarded as an attachment: its name, content type, disposition, and size in octets once decoded. A non-ASCII name is decoded whether it was sent the standard way, RFC 2231, as RFC 2047 encoded words, as Gmail and Outlook send it, or as raw 8-bit text, which is read as UTF-8 like a raw header. An attached message is one entry, not walked into, and so is a multipart part that is itself attached; the size of either is that of its contents written out again, which can differ a little from what arrived, for instance in line endings; a size that cannot be worked out is null. The content itself is in `raw`. |
 | `message.raw` | The whole message exactly as received, in base64. It is the one field that loses nothing, since JSON cannot carry arbitrary bytes. |
-| `message.incomplete` | True when the message had more than 5000 header fields or 1000 parts, counting every part's, and the rest were left out of the fields above, or when it could not be read at all. Either way, all of it is in `raw`. |
+| `message.incomplete` | True when the message had more than 5000 header fields, 1000 parts or 100 lines the parser could not read as headers, counting every part's, and the rest were left out of the fields above, or when it could not be read at all. Either way, all of it is in `raw`. |
 | `message.parse_error` | Null, or what went wrong when the message could not be read at all, such as multiparts nested a thousand deep, which runs the parser out of stack. Every field read from the message is then null or empty, and the envelope, `size` and `raw` are sent as usual. |
 
 A header sent as raw 8-bit text rather than as encoded words names no
@@ -189,10 +189,11 @@ syslog line as well as the webhook. Splitting those headers into parameters
 takes time that grows with the square of their length, and the parser does it
 for every multipart boundary, so without the limit one message could hold the
 thread parsing it for minutes. A real one is a few dozen characters. In the
-same way, parsing keeps at most 5000 header fields and 1000 parts, across the
-message and everything in it: a message of ten megabytes of tiny headers would
-otherwise become millions of them in memory, and a JSON body several times the
-size of the message.
+same way, parsing keeps at most 5000 header fields, 1000 parts and 100 notes
+of lines it could not read as headers, across the message and everything in
+it: a message of ten megabytes of tiny headers, or of lines that are not
+headers at all, would otherwise become millions of objects and over a
+gigabyte in memory, and a JSON body several times the size of the message.
 
 Sending never holds up the mail. A message is queued for the webhook in the
 same step that writes it to the file, and the request is made later from a

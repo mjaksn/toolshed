@@ -120,6 +120,10 @@ MAX_HEADER_TEXT = 4096
 MAX_PARSED_HEADERS = 5000
 MAX_PARSED_PARTS = 1000
 
+# And how many parse defects, the parser's notes on lines it could not read as
+# headers. A real message has none or a few; nothing here reads them at all.
+MAX_PARSED_DEFECTS = 100
+
 # The headers the email package splits into parameters; see BoundedMessage.
 PARAM_HEADERS = {"content-type", "content-disposition"}
 
@@ -367,6 +371,24 @@ def header_text(value):
     return text + "..." if cut else text
 
 
+class BoundedDefects(list):
+    """A Message's list of parse defects, keeping only MAX_PARSED_DEFECTS a parse.
+
+    Shares BoundedMessage's budget, so the limit is across every part.
+    """
+
+    def __init__(self, budget):
+        super().__init__()
+        self.budget = budget
+
+    def append(self, defect):
+        if self.budget["defects"] <= 0:
+            self.budget["dropped"] = True
+            return
+        self.budget["defects"] -= 1
+        super().append(defect)
+
+
 class BoundedMessage(Message):
     """A Message whose parameter headers are read no longer than MAX_HEADER_TEXT.
 
@@ -389,9 +411,19 @@ class BoundedMessage(Message):
     became two million of them held at once, a third of a gigabyte, and the
     webhook's list of them a JSON body seven times the message. Dropping any
     marks the budget `dropped`, which the webhook reports as `incomplete`.
+
+    The parser also keeps a defect for every header line it cannot make
+    sense of, a bare colon or a stray `From ` line, and appends those straight
+    to `defects` rather than through anything above, so ten megabytes of them
+    held over a gigabyte. `defects` is a BoundedDefects on the same budget.
     """
 
     budget = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.budget is not None:
+            self.defects = BoundedDefects(self.budget)
 
     def set_raw(self, name, value):
         if self.budget is not None:
@@ -426,7 +458,10 @@ def parse_message(body):
     The message comes back with `incomplete` set when its budget ran out and
     headers or parts were left out.
     """
-    budget = {"headers": MAX_PARSED_HEADERS, "parts": MAX_PARSED_PARTS, "dropped": False}
+    budget = {
+        "headers": MAX_PARSED_HEADERS, "parts": MAX_PARSED_PARTS,
+        "defects": MAX_PARSED_DEFECTS, "dropped": False,
+    }
     budgeted = type("BudgetedMessage", (BoundedMessage,), {"budget": budget})
     msg = BytesParser(_class=budgeted).parsebytes(body)
     msg.incomplete = budget["dropped"]
