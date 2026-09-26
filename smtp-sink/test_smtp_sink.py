@@ -1667,6 +1667,19 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertTrue(long_value.endswith("..."))
         self.assertLess(len(long_value), smtp_sink.MAX_HEADER_TEXT)
 
+    def test_only_runs_with_an_encoded_word_are_decoded(self):
+        # Alternating ASCII and not made a run of every other character, and
+        # each run cost a full decode whether or not it held anything to decode.
+        alternating = "aé" * 2000
+        body = f"X-Alt: {alternating}\r\nSubject: é =?utf-8?q?M=C3=BCnchen?=\r\n\r\nx".encode()
+        with mock.patch.object(smtp_sink, "header_text", wraps=smtp_sink.header_text) as decode:
+            message = smtp_sink.webhook_payload(delivery(body))["message"]
+        # Once for the subject's encoded word in the headers list, once for
+        # the subject field itself.
+        self.assertEqual(decode.call_count, 2)
+        self.assertEqual(message["headers"][0]["value"], alternating)
+        self.assertEqual(message["subject"], "é München")
+
     def test_a_long_raw_8_bit_header_is_cut_like_any_other(self):
         # No ASCII in it at all, so header_text never sees it and only
         # header_value's own cut stands between it and the JSON.

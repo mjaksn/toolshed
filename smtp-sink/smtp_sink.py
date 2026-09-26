@@ -631,9 +631,13 @@ def ascii_run_text(run):
 
     `decode_header` drops the space at either end of what it is given, and
     here that space is what separates the run from the raw text beside it.
+
+    A run with no `=?` in it holds no encoded word and is left as it is.
+    Decoding costs the same whatever the run holds, and a value alternating
+    one ASCII character with one that is not made thousands of runs a header.
     """
     core = run.strip()
-    if not core:
+    if not core or "=?" not in core:
         return run
     start = run.index(core)
     return run[:start] + header_text(core) + run[start + len(core):]
