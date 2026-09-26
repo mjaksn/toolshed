@@ -1630,6 +1630,38 @@ class WebhookSenderTests(unittest.TestCase):
         self.assertIn("webhook http://127.0.0.1:", self.err.getvalue())
         self.assertNotIn("Traceback", self.err.getvalue())
 
+    def test_what_the_webhook_says_reaches_stderr_escaped(self):
+        # A reason phrase is the server's to choose, control characters and
+        # all, and it goes into the one line the failure costs.
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+
+        def answer():
+            conn, _ = listener.accept()
+            with conn:
+                conn.settimeout(REPLY_TIMEOUT)
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    request += conn.recv(65536)
+                head, _, body = request.partition(b"\r\n\r\n")
+                length = int(re.search(rb"Content-Length: (\d+)", head).group(1))
+                while len(body) < length:
+                    body += conn.recv(65536)
+                conn.sendall(b"HTTP/1.1 500 bad\x1b[2J\rreason\r\nContent-Length: 0\r\n\r\n")
+
+        threading.Thread(target=answer, daemon=True).start()
+        sender = smtp_sink.WebhookSender(f"http://127.0.0.1:{listener.getsockname()[1]}/")
+        sender.start()
+        self.addCleanup(sender.stop, REPLY_TIMEOUT)
+        self.assertTrue(sender.submit(delivery()))
+        self.assertTrue(sender.wait_idle(REPLY_TIMEOUT))
+        err = self.err.getvalue()
+        self.assertIn("HTTP 500 bad\\x1b[2J\\rreason", err)
+        self.assertNotIn("\x1b", err)
+        self.assertNotIn("\r", err)
+
     def test_a_message_that_cannot_be_built_costs_its_send(self):
         hook = RecordingServer(self)
         with mock.patch.object(smtp_sink, "webhook_payload", side_effect=ValueError("unbuildable")):

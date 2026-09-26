@@ -752,8 +752,11 @@ class WebhookSender:
             try:
                 self.deliver(delivery)
             except Exception as exc:
+                # Escaped, because the text can come from the webhook: a
+                # status line or reason with a carriage return or a terminal
+                # escape in it would otherwise reach stderr as it came.
                 print(f"[{delivery.peer[0]}] webhook {self.shown} failed, not sent;"
-                      f" the message is in the log file: {exc}", file=sys.stderr)
+                      f" the message is in the log file: {visible(str(exc))}", file=sys.stderr)
             finally:
                 with self.idle:
                     self.waiting -= 1
