@@ -837,6 +837,14 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         ):
             reader, writer = await self.connect()
             reply = await self.send_message(reader, writer, "Subject: s\r\n\r\nbody")
+            # The 250 comes before the line is built, so the complaint about
+            # the queue can still be on its way. Waited for here, with stderr
+            # still captured, rather than looked for once.
+            deadline = asyncio.get_running_loop().time() + REPLY_TIMEOUT
+            while "syslog queue full" not in err.getvalue():
+                if asyncio.get_running_loop().time() > deadline:
+                    break
+                await asyncio.sleep(0.01)
         self.assertTrue(reply and reply[0].startswith("250"), reply)
         self.assertIn("syslog queue full", err.getvalue())
         self.assertIn(b"Subject: s\r\n", self.log.read_bytes())
