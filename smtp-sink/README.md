@@ -37,8 +37,9 @@ python smtp_sink.py --bind 192.168.1.50 --webhook-url https://hooks.example.test
 
 The syslog line carries the subject as text: a device that puts a degree sign
 or an accent in one sends it as an RFC 2047 encoded word, and that is decoded
-on the way out. A subject that cannot be decoded is forwarded as it arrived
-rather than costing the whole line.
+on the way out. One that sends it as raw 8-bit text instead has it read as
+UTF-8, as the webhook reads it. A subject that cannot be decoded is forwarded
+as it arrived rather than costing the whole line.
 
 The subject and body sit between double quotes in that line, and both come
 from whoever sent the message. A quote or backslash inside either is escaped

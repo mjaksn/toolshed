@@ -424,6 +424,14 @@ class ForwardSyslogTests(unittest.TestCase):
         self.assertIn("peer=192.0.2.7", line)
         line.encode("utf-8")  # would raise on a surrogate
 
+    def test_a_raw_utf_8_subject_reads_as_the_webhook_reads_it(self):
+        # Read through `get`, every high byte had become a replacement
+        # character, and decoding beside an encoded word then turned those
+        # into the literal text `�`.
+        body = "Subject: café =?utf-8?q?M=C3=BCnchen?=\r\n\r\nbody\r\n".encode()
+        line = smtp_sink.syslog_line(("p", 1), "<a>", ["<b>"], body, False, 2000)
+        self.assertIn('subject="café München"', line)
+
     def test_does_nothing_when_no_syslog_is_configured(self):
         with mock.patch.object(smtp_sink, "syslog", None):
             smtp_sink.send_syslog("peer=192.0.2.7 subject=\"s\"")

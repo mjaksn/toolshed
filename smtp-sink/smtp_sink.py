@@ -515,14 +515,12 @@ def message_text(msg):
 def syslog_line(peer, mail_from, rcpts, body, include_body, max_len):
     """The one line a message becomes in syslog, no longer than `max_len`."""
     msg = parse_message(body)
-    raw_subject = msg.get("Subject")
-    subject = "(no subject)" if raw_subject is None else header_text(str(raw_subject))
-    # A raw 8-bit subject, one sent without encoded words, comes back out of
-    # the parser as surrogates. Those cannot be encoded again, and the syslog
-    # handler would raise on the way out and lose the whole line, so they are
-    # flattened to replacement characters here where only the subject suffers.
-    subject = subject.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
-    subject = " ".join(subject.split())
+    # Read as the webhook reads it, from the raw value: a raw 8-bit subject is
+    # read as UTF-8, and any encoded words beside it are decoded. Read through
+    # `get`, it came back with every high byte replaced, and decoding that put
+    # the replacement characters in the line as literal `�` text.
+    subject = decoded_header(msg, "Subject")
+    subject = "(no subject)" if subject is None else " ".join(subject.split())
     line = (
         f'peer={peer[0]} from={bare(mail_from)} to={",".join(bare(r) for r in rcpts)} '
         f'subject="{quoted(subject)}"'
@@ -576,9 +574,11 @@ def clean(text):
     """`text` with no lone surrogates, so it can be encoded as UTF-8.
 
     A header sent as raw 8-bit rather than as encoded words comes out of the
-    parser holding surrogates. `json.dumps` writes those as `\\udcxx` escapes,
-    which a strict receiver refuses along with the whole request, so they are
-    flattened to replacement characters, as the syslog subject is.
+    parser holding surrogates, one for each byte. They are read back as UTF-8,
+    and only what is not UTF-8 becomes a replacement character. Left in,
+    `json.dumps` writes them as `\\udcxx` escapes, which a strict receiver
+    refuses along with the whole request, and the syslog handler raises on
+    them and loses the whole line.
     """
     try:
         raw = text.encode("utf-8", "surrogateescape")
