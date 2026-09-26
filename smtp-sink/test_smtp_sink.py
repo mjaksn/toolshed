@@ -812,6 +812,17 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await self.command(reader, writer, "NOOP"))[0].startswith("250"))
         self.assertTrue((await self.command(reader, writer, "DATA"))[0].startswith("503"))
 
+    async def test_a_message_that_drew_a_451_is_not_sent_to_the_webhook(self):
+        # The client was told to try again, so it will, and the webhook would
+        # hear of the message twice, once for a copy the log file never had.
+        self.args.log = str(self.dir / "missing" / "sink.log")
+        webhook = mock.Mock()
+        with mock.patch.object(smtp_sink, "webhook", webhook), contextlib.redirect_stderr(io.StringIO()):
+            reader, writer = await self.connect()
+            reply = await self.send_message(reader, writer, "Subject: s\r\n\r\nbody")
+        self.assertTrue(reply[0].startswith("451"), reply)
+        webhook.submit.assert_not_called()
+
     async def test_the_advertised_size_is_the_limit_that_is_enforced(self):
         reader, writer = await self.connect()
         ehlo = await self.command(reader, writer, "EHLO client.example.test")
