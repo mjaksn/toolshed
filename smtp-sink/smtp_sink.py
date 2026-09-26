@@ -835,7 +835,8 @@ class WebhookSender:
     def submit(self, delivery):
         """Queue one message, or return False if it would overfill the queue.
 
-        Never blocks: this is called from the event loop.
+        Never blocks. It is called from log_message, in a worker thread, with
+        log_lock held, so while it runs every other message's log write waits.
         """
         size = len(delivery.body)
         with self.lock:
