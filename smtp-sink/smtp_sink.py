@@ -1252,8 +1252,10 @@ def webhook_url(text):
 def header_pair(text):
     """`--header "Name: Value"` as a (name, value) pair, for argparse to call.
 
-    A refusal names the header but never repeats its value, which is as likely
-    as not to be a token.
+    A refusal never repeats the value, which is as likely as not to be a
+    token, and names the header only once the name is known to be one. Given
+    `Authorization Bearer abc:def`, what comes before the first colon is half
+    the secret, not a name.
     """
     name, colon, value = text.partition(":")
     if not colon:
@@ -1262,7 +1264,9 @@ def header_pair(text):
     # take a trailing line break off before the check below could refuse it.
     value = value.strip(" \t")
     if not HEADER_NAME.fullmatch(name):
-        raise argparse.ArgumentTypeError(f"not a header name: {name!r}")
+        raise argparse.ArgumentTypeError(
+            'what comes before the first colon is not a header name; expected "Name: Value"'
+        )
     if name.lower() in COMPUTED_HEADERS:
         raise argparse.ArgumentTypeError(f"{name} is worked out from the body and cannot be given")
     # A line break would start a header of its own, and http.client refuses

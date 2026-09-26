@@ -2007,7 +2007,10 @@ class WebhookCommandLineTests(unittest.TestCase):
                 self.assertNotIn("Traceback", err)
 
     def test_a_refused_header_does_not_print_its_value(self):
-        for header in ("X-Token: s3cret€", "X-Token: s3cret\r\nX-B: 1", "s3cret"):
+        for header in ("X-Token: s3cret€", "X-Token: s3cret\r\nX-B: 1", "s3cret",
+                       # No separator, so the name runs into the token and
+                       # stops at a colon inside it.
+                       "Authorization Bearer s3cret:tail"):
             with self.subTest(header=header):
                 code, err = self.run_main("--webhook-url", "http://example.test/", "--header", header)
                 self.assertEqual(code, 2)
