@@ -26,6 +26,7 @@ import argparse
 import asyncio
 import base64
 import contextlib
+import http.client
 import http.server
 import io
 import json
@@ -1492,6 +1493,20 @@ class WebhookSenderTests(unittest.TestCase):
                 self.send(hook, method=method)
                 self.assertEqual(hook.requests[0].method, method)
                 self.assertIn("envelope", json.loads(hook.requests[0].body))
+
+    def test_a_large_body_goes_in_pieces_and_arrives_whole(self):
+        # One sendall of the whole body would have to finish inside the
+        # socket's timeout however steadily it was going.
+        hook = RecordingServer(self)
+        body = b"Subject: big\r\n\r\n" + b"x" * 300_000 + b"\r\n"
+        with mock.patch.object(http.client.HTTPConnection, "send",
+                               autospec=True, side_effect=http.client.HTTPConnection.send) as send:
+            self.send(hook, delivery(body))
+        sizes = [len(call.args[1]) for call in send.call_args_list]
+        self.assertGreater(len(sizes), 4)
+        self.assertLessEqual(max(sizes), smtp_sink.WEBHOOK_CHUNK)
+        payload = json.loads(hook.requests[0].body)
+        self.assertEqual(base64.b64decode(payload["message"]["raw"]), body)
 
     def test_get_sends_no_body(self):
         hook = RecordingServer(self)

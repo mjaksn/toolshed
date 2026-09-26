@@ -151,12 +151,13 @@ webhook that is slow, down, or accepts the connection and never answers holds
 up no SMTP client, whether the one that sent that message or any other.
 Requests go one at a time, in the order messages were logged, even when two
 clients finish at once, since the order of the queue is the order of the file.
-Each connect, send and read gives up after 10 seconds without progress.
-Looking up the host's name is not covered by that, so a URL naming a host
-whose DNS server does not answer holds the sender for as long as the system
-resolver takes. Messages wait for the sender in a queue of at most 1000
-messages and 64 MB; while it is full, a message still goes in the file, and is
-not sent, with a line on stderr.
+A connect, a read, or the sending of each 64 KiB of the body gives up after 10
+seconds, so a large message is sent as long as it keeps moving. Looking up the
+host's name is not covered by that, so a URL naming a host whose DNS server
+does not answer holds the sender for as long as the system resolver takes.
+Messages wait for the sender in a queue of at most 1000 messages and 64 MB;
+while it is full, a message still goes in the file, and is not sent, with a
+line on stderr.
 
 A request that fails, whether it cannot connect, times out, or is answered
 with anything but a 2xx status, costs one line on stderr, and the message is

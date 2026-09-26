@@ -85,11 +85,18 @@ FORWARD_QUEUE_SIZE = 1000
 # hold the forwarder's thread when the sink is stopped.
 SYSLOG_TIMEOUT = 5
 
-# Seconds a webhook connect, send or read may go without progress before the
-# request counts as failed. It bounds each step rather than the whole request,
-# so a server that trickles its reply can hold the sender longer than this, but
-# only the sender: SMTP clients never wait on it.
+# Seconds a webhook connect, a read, or the sending of one WEBHOOK_CHUNK of
+# the body may take before the request counts as failed. It bounds each step
+# rather than the whole request, so a server that trickles its reply can hold
+# the sender longer than this, but only the sender: SMTP clients never wait on
+# it.
 WEBHOOK_TIMEOUT = 10
+
+# How much of the body goes to the socket at a time. A socket's timeout bounds
+# a whole `sendall`, so a body sent in one would have to be through in
+# WEBHOOK_TIMEOUT however steadily it was going. Sent in pieces, a body only has
+# to keep moving at a piece per timeout, 6.4 KB a second.
+WEBHOOK_CHUNK = 64 * 1024
 
 # How much can wait for the webhook. Unlike the syslog queue this holds whole
 # messages, up to 10 MB apiece, because the JSON is built from them by the
@@ -763,7 +770,10 @@ class WebhookSender:
             )
             for name, value in headers:
                 conn.putheader(name, value)
-            conn.endheaders(body)
+            conn.endheaders()
+            if body is not None:
+                for start in range(0, len(body), WEBHOOK_CHUNK):
+                    conn.send(body[start : start + WEBHOOK_CHUNK])
             response = conn.getresponse()
             # Read, so the server is not cut off mid-reply, but not without
             # limit: nothing in it is used.
