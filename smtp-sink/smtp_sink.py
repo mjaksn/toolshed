@@ -710,9 +710,18 @@ def webhook_payload(delivery):
     from RFC 2047. `raw` is the whole message exactly as received, in base64,
     because nothing else can carry arbitrary bytes through JSON intact, and it
     is the only field here that loses nothing.
+
+    A message that cannot be parsed, or read once parsed, still goes out: the
+    fields that come from reading it are null or empty, `incomplete` is set,
+    and `parse_error` says what went wrong. The parser itself runs out of
+    stack on multiparts nested a thousand deep, and whatever else it or a part
+    can raise, the envelope and `raw` do not depend on it.
     """
     body = delivery.body
-    msg = parse_message(body)
+    try:
+        fields = message_fields(parse_message(body))
+    except Exception as exc:
+        fields = {**UNREAD_FIELDS, "parse_error": visible(f"{type(exc).__name__}: {exc}")}
     return {
         "id": str(uuid.uuid4()),
         "received": delivery.received,
@@ -722,25 +731,41 @@ def webhook_payload(delivery):
         "envelope": {"from": delivery.mail_from, "to": list(delivery.rcpts)},
         "message": {
             "size": len(body),
-            "subject": decoded_header(msg, "Subject"),
-            "from": decoded_header(msg, "From"),
-            "to": decoded_header(msg, "To"),
-            "cc": decoded_header(msg, "Cc"),
-            "reply_to": decoded_header(msg, "Reply-To"),
-            "date": decoded_header(msg, "Date"),
-            "message_id": decoded_header(msg, "Message-ID"),
-            "content_type": msg.get_content_type(),
-            "headers": [
-                {"name": clean(name), "value": header_value(value)}
-                for name, value in msg.raw_items()
-            ],
-            "text": first_text(msg, "text/plain"),
-            "html": first_text(msg, "text/html"),
-            "attachments": attachments(msg),
+            **fields,
             "raw": base64.b64encode(body).decode("ascii"),
-            "incomplete": msg.incomplete,
         },
     }
+
+
+def message_fields(msg):
+    """What `message` in the webhook's JSON says of a parsed message."""
+    return {
+        "subject": decoded_header(msg, "Subject"),
+        "from": decoded_header(msg, "From"),
+        "to": decoded_header(msg, "To"),
+        "cc": decoded_header(msg, "Cc"),
+        "reply_to": decoded_header(msg, "Reply-To"),
+        "date": decoded_header(msg, "Date"),
+        "message_id": decoded_header(msg, "Message-ID"),
+        "content_type": msg.get_content_type(),
+        "headers": [
+            {"name": clean(name), "value": header_value(value)}
+            for name, value in msg.raw_items()
+        ],
+        "text": first_text(msg, "text/plain"),
+        "html": first_text(msg, "text/html"),
+        "attachments": attachments(msg),
+        "incomplete": msg.incomplete,
+        "parse_error": None,
+    }
+
+
+# message_fields for a message that could not be read at all.
+UNREAD_FIELDS = {
+    "subject": None, "from": None, "to": None, "cc": None, "reply_to": None,
+    "date": None, "message_id": None, "content_type": None, "headers": [],
+    "text": None, "html": None, "attachments": [], "incomplete": True, "parse_error": None,
+}
 
 
 class WebhookError(Exception):

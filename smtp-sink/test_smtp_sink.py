@@ -1442,6 +1442,33 @@ class WebhookPayloadTests(unittest.TestCase):
     def test_a_charset_name_that_is_not_ascii_leaves_the_header_as_it_came(self):
         self.assertEqual(smtp_sink.header_text("=?utf-�?q?a?="), "=?utf-�?q?a?=")
 
+    def test_a_message_the_parser_cannot_take_still_goes_out(self):
+        # Multiparts nested a thousand deep run the parser out of stack. The
+        # envelope and raw do not need it, so they go out regardless.
+        depth = 1000
+        body = (
+            "".join(f'Content-Type: multipart/mixed; boundary="b{i}"\r\n\r\n--b{i}\r\n' for i in range(depth))
+            + "Content-Type: text/plain\r\n\r\nx"
+            + "".join(f"\r\n--b{i}--\r\n" for i in reversed(range(depth)))
+        ).encode("ascii")
+        payload = smtp_sink.webhook_payload(delivery(body))
+        message = payload["message"]
+        self.assertIn("RecursionError", message["parse_error"])
+        self.assertTrue(message["incomplete"])
+        self.assertIsNone(message["subject"])
+        self.assertEqual(message["size"], len(body))
+        self.assertEqual(base64.b64decode(message["raw"]), body)
+        self.assertEqual(payload["envelope"]["from"], "<ups@example.test>")
+        json.dumps(payload)
+
+    def test_an_unread_message_has_the_same_fields_as_a_read_one(self):
+        read = smtp_sink.webhook_payload(delivery())["message"]
+        with mock.patch.object(smtp_sink, "parse_message", side_effect=ValueError("no")):
+            unread = smtp_sink.webhook_payload(delivery())["message"]
+        self.assertEqual(list(unread), list(read))
+        self.assertIsNone(read["parse_error"])
+        self.assertEqual(unread["parse_error"], "ValueError: no")
+
     def test_a_parse_keeps_only_so_many_headers_and_parts(self):
         # Two million five-byte headers were two million entries in memory
         # and in the JSON. Past the budget they are dropped as they arrive.
