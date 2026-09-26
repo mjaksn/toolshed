@@ -1099,40 +1099,45 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queued[0].helo, "old.example.test")
 
     async def test_a_greeting_with_no_name_leaves_helo_null(self):
-        queued = []
-        webhook = mock.Mock(submit=lambda delivery: queued.append(delivery) or True)
-        with mock.patch.object(smtp_sink, "webhook", webhook):
-            reader, writer = await self.connect()
-            await self.command(reader, writer, "EHLO")
-            await self.command(reader, writer, "MAIL FROM:<a@example.test>")
-            await self.command(reader, writer, "RCPT TO:<b@example.test>")
-            await self.command(reader, writer, "DATA")
-            writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
-            await writer.drain()
-            self.assertTrue((await read_reply(reader))[0].startswith("250"))
-        self.assertIsNone(queued[0].helo)
-        self.assertIsNone(smtp_sink.webhook_payload(queued[0])["helo"])
+        for verb in ("EHLO", "HELO"):
+            with self.subTest(verb=verb):
+                queued = []
+                webhook = mock.Mock(submit=lambda delivery, queued=queued: queued.append(delivery) or True)
+                with mock.patch.object(smtp_sink, "webhook", webhook):
+                    reader, writer = await self.connect()
+                    await self.command(reader, writer, verb)
+                    await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+                    await self.command(reader, writer, "RCPT TO:<b@example.test>")
+                    await self.command(reader, writer, "DATA")
+                    writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+                    await writer.drain()
+                    self.assertTrue((await read_reply(reader))[0].startswith("250"))
+                self.assertIsNone(queued[0].helo)
+                self.assertIsNone(smtp_sink.webhook_payload(queued[0])["helo"])
 
     async def test_the_helo_name_is_escaped_cut_and_kept_through_rset(self):
-        queued = []
-        webhook = mock.Mock(submit=lambda delivery: queued.append(delivery) or True)
+        # Each greeting keeps its own copy of this, so each is checked, and
+        # each after the other, which it has to replace.
         name = "ups\x1b[2J" + "x" * 300
-        with mock.patch.object(smtp_sink, "webhook", webhook):
-            reader, writer = await self.connect()
-            # Replaced by the EHLO after it, as a second greeting should be.
-            await self.command(reader, writer, "HELO first.example.test")
-            await self.command(reader, writer, f"EHLO {name}")
-            await self.command(reader, writer, "RSET")
-            await self.command(reader, writer, "MAIL FROM:<a@example.test>")
-            await self.command(reader, writer, "RCPT TO:<b@example.test>")
-            await self.command(reader, writer, "DATA")
-            writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
-            await writer.drain()
-            self.assertTrue((await read_reply(reader))[0].startswith("250"))
-        helo = queued[0].helo
-        # Cut to MAX_HELO before escaping, so the escape makes it longer.
-        self.assertEqual(helo, "ups\\x1b[2J" + "x" * (smtp_sink.MAX_HELO - len("ups\x1b[2J")))
-        self.assertNotIn("\x1b", helo)
+        for first, verb in (("HELO", "EHLO"), ("EHLO", "HELO")):
+            with self.subTest(verb=verb):
+                queued = []
+                webhook = mock.Mock(submit=lambda delivery, queued=queued: queued.append(delivery) or True)
+                with mock.patch.object(smtp_sink, "webhook", webhook):
+                    reader, writer = await self.connect()
+                    await self.command(reader, writer, f"{first} first.example.test")
+                    await self.command(reader, writer, f"{verb} {name}")
+                    await self.command(reader, writer, "RSET")
+                    await self.command(reader, writer, "MAIL FROM:<a@example.test>")
+                    await self.command(reader, writer, "RCPT TO:<b@example.test>")
+                    await self.command(reader, writer, "DATA")
+                    writer.write(b"Subject: s\r\n\r\nbody\r\n.\r\n")
+                    await writer.drain()
+                    self.assertTrue((await read_reply(reader))[0].startswith("250"))
+                helo = queued[0].helo
+                # Cut to MAX_HELO before escaping, so the escape makes it longer.
+                self.assertEqual(helo, "ups\\x1b[2J" + "x" * (smtp_sink.MAX_HELO - len("ups\x1b[2J")))
+                self.assertNotIn("\x1b", helo)
 
     async def test_a_stalled_webhook_holds_up_nothing(self):
         # A webhook that takes the request and never answers. The client gets
