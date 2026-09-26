@@ -1866,6 +1866,22 @@ class WebhookSenderTests(unittest.TestCase):
         self.assertIn("timed out", self.err.getvalue())
         self.assertIn("failed, not sent", self.err.getvalue())
 
+    def test_a_2xx_is_a_success_even_if_its_body_cannot_be_read(self):
+        sender = smtp_sink.WebhookSender("http://hooks.example.test/x")
+        answer = mock.Mock(status=200, reason="OK")
+        answer.read.side_effect = http.client.IncompleteRead(b"par", 10)
+        with mock.patch.object(http.client, "HTTPConnection") as connection:
+            connection.return_value.getresponse.return_value = answer
+            sender.deliver(delivery())  # nothing raised
+        answer.read.side_effect = ConnectionResetError("gone mid-body")
+        answer.status, answer.reason = 500, "Internal Server Error"
+        with (
+            mock.patch.object(http.client, "HTTPConnection") as connection,
+            self.assertRaisesRegex(smtp_sink.WebhookError, "HTTP 500"),
+        ):
+            connection.return_value.getresponse.return_value = answer
+            sender.deliver(delivery())
+
     def test_a_given_host_or_accept_encoding_is_sent_once(self):
         # http.client adds both of its own unless told not to, and a second
         # Host header is one a server may well refuse.

@@ -920,8 +920,13 @@ class WebhookSender:
                     conn.send(body[start : start + WEBHOOK_CHUNK])
             response = conn.getresponse()
             # Read, so the server is not cut off mid-reply, but not without
-            # limit: nothing in it is used.
-            response.read(64 * 1024)
+            # limit: nothing in it is used. So nothing that goes wrong reading
+            # it counts either: the status has already said how it went, and a
+            # 2xx cut off mid-body was still taken.
+            try:
+                response.read(64 * 1024)
+            except (OSError, http.client.HTTPException):
+                pass
         finally:
             conn.close()
         if not 200 <= response.status < 300:
