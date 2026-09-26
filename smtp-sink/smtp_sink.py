@@ -580,9 +580,9 @@ def first_text(msg, content_type):
 def part_size(part):
     """A part's size in octets once decoded, or None if it cannot be had.
 
-    An attached message is not a payload to decode but a message, so its size
-    is that of the message written out again, which is close to, though not
-    always exactly, what arrived.
+    An attached message, or an attached multipart part, holds parts rather
+    than a payload to decode, so its size is that of those parts written out
+    again, which is close to, though not always exactly, what arrived.
     """
     if part.is_multipart():
         try:
