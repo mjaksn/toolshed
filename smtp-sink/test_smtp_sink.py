@@ -1134,7 +1134,8 @@ class RecordingServer:
     taken the request and gone quiet.
     """
 
-    def __init__(self, case, status=204, stall=False, location=None):
+    def __init__(self, case, status=204, stall=False, location=None,
+                 server_class=http.server.ThreadingHTTPServer, host="127.0.0.1"):
         self.requests = []
         self.arrived = threading.Event()
         self.released = threading.Event()
@@ -1162,7 +1163,7 @@ class RecordingServer:
             def log_message(self, *args):
                 pass
 
-        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = server_class((host, 0), Handler)
         self.server.daemon_threads = True
         self.server.block_on_close = False
         # A short poll, because shutdown waits out one interval, and the
@@ -1175,7 +1176,8 @@ class RecordingServer:
         case.addCleanup(self.server.shutdown)
         case.addCleanup(self.released.set)
         self.case = case
-        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/hook?key=value"
+        shown = f"[{host}]" if ":" in host else host
+        self.url = f"http://{shown}:{self.server.server_address[1]}/hook?key=value"
 
     def sender(self, **kwargs):
         sender = smtp_sink.WebhookSender(self.url, **kwargs)
@@ -1421,6 +1423,25 @@ class WebhookSenderTests(unittest.TestCase):
         sender = smtp_sink.WebhookSender("https://hooks.example.test:8443/services/T0/B0/secret?token=x")
         self.assertEqual(sender.shown, "https://hooks.example.test:8443")
         self.assertEqual(smtp_sink.WebhookSender("http://[::1]/x").shown, "http://[::1]")
+
+    def test_a_url_without_a_port_gets_the_schemes_own(self):
+        # Left to http.client, the colons of a bare IPv6 host are read as a
+        # port: http://[::1]/ went to host ":" on port 1.
+        for url, host, port in (("http://[::1]/x", "::1", 80), ("https://[::1]/x", "::1", 443),
+                                ("http://192.0.2.1/", "192.0.2.1", 80)):
+            with self.subTest(url=url):
+                sender = smtp_sink.WebhookSender(url)
+                self.assertEqual((sender.host, sender.port), (host, port))
+
+    def test_reaches_an_ipv6_server(self):
+        class V6Server(http.server.ThreadingHTTPServer):
+            address_family = socket.AF_INET6
+
+        hook = RecordingServer(self, server_class=V6Server, host="::1")
+        self.send(hook)
+        self.assertEqual(len(hook.requests), 1)
+        self.assertEqual(hook.requests[0].header("Host"), [f"[::1]:{hook.server.server_address[1]}"])
+        self.assertEqual(self.err.getvalue(), "")
 
     def test_certificates_are_checked_unless_told_otherwise(self):
         checked = smtp_sink.WebhookSender("https://hooks.example.test/").context

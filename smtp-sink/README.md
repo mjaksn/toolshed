@@ -128,7 +128,7 @@ shortened:
 | `received` | When the message was logged, the same timestamp as its `Received:` line in the log file, so the two can be matched. |
 | `sink` | The host name of the machine the sink runs on. |
 | `peer` | The address and port the message came from. |
-| `helo` | The name the client gave in HELO or EHLO, or null if it gave none. At most 255 characters are kept. |
+| `helo` | The name the client gave in HELO or EHLO, or null if it gave none: the first 255 characters of what it sent, control characters written out as escapes as in an address. |
 | `envelope` | The sender from MAIL and the recipients from RCPT, exactly as the log file records them, ESMTP parameters dropped. A control character in an address stays written out as an escape, so a carriage return arrives as the two characters `\r`. |
 | `message.size` | The message in octets, as received. |
 | `message.subject`, `from`, `to`, `cc`, `reply_to`, `date`, `message_id` | Those headers as text, RFC 2047 encoded words decoded, or null for one the message does not have. |
@@ -149,6 +149,9 @@ of its own, so a webhook that is slow, down, or accepts the connection and
 never answers holds up no SMTP client, whether the one that sent that message
 or any other. Requests go one at a time, in the order messages were logged,
 and each connect, send and read gives up after 10 seconds without progress.
+Looking up the host's name is not covered by that, so a URL naming a host
+whose DNS server does not answer holds the sender for as long as the system
+resolver takes.
 Messages wait for the sender in a queue of at most 1000 messages and 64 MB;
 while it is full, a message still goes in the file, and is not sent, with a
 line on stderr.

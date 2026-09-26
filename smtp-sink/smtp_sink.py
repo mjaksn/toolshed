@@ -539,14 +539,17 @@ class WebhookSender:
         parts = urllib.parse.urlsplit(url)
         self.https = parts.scheme.lower() == "https"
         self.host = parts.hostname
-        self.port = parts.port
+        # Always a number. Given no port, http.client looks for one after the
+        # last colon in the host, and an IPv6 address such as ::1 has one, so
+        # http://[::1]/ would go to a host of ":" on port 1.
+        self.port = parts.port or (443 if self.https else 80)
         self.target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
         self.method = method
         self.headers = list(headers)
         # Shown at startup and in every error line. Scheme, host and port
         # only, because plenty of webhook URLs carry their secret in the path.
         host = f"[{self.host}]" if ":" in self.host else self.host
-        self.shown = f"{parts.scheme.lower()}://{host}" + (f":{self.port}" if self.port else "")
+        self.shown = f"{parts.scheme.lower()}://{host}" + (f":{parts.port}" if parts.port else "")
         self.context = None
         if self.https:
             self.context = ssl.create_default_context()
