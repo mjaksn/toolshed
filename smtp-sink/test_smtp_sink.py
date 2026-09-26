@@ -1851,6 +1851,19 @@ class WebhookSenderTests(unittest.TestCase):
         self.assertIn("the message is in the log file", self.err.getvalue())
         self.assertNotIn("Traceback", self.err.getvalue())
 
+    def test_a_failure_line_shows_no_path_query_or_location(self):
+        # Plenty of webhook URLs carry their secret in the path or the query,
+        # and a redirect's location can too. The line a failure costs names
+        # the scheme, host and port, and nothing else of any of them.
+        failing = RecordingServer(self, status=500)
+        self.send(failing)
+        moved = RecordingServer(self, status=302, location="http://127.0.0.1:1/moved/s3cret?token=t0ken")
+        self.send(moved)
+        err = self.err.getvalue()
+        self.assertEqual(err.count("webhook http://127.0.0.1:"), 2)
+        for leaked in ("/hook", "key=value", "s3cret", "t0ken", "/moved"):
+            self.assertNotIn(leaked, err)
+
     def test_a_redirect_is_reported_not_followed(self):
         target = RecordingServer(self)
         hook = RecordingServer(self, status=302, location=target.url)
@@ -2098,6 +2111,39 @@ class WebhookCommandLineTests(unittest.TestCase):
             print("from <üćā@example.test>")
         console.flush()
         self.assertEqual(console.buffer.getvalue(), b"from <\xfc\\u0107\\u0101@example.test>\n")
+
+    def test_the_startup_line_shows_no_path_or_query(self):
+        class Stop(Exception):
+            pass
+
+        class Server:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def serve_forever(self):
+                raise Stop
+
+        async def start_server(*args, **kwargs):
+            return Server()
+
+        url = "https://hooks.example.test:8443/services/s3cret?token=t0ken"
+        argv = ["smtp_sink.py", "--bind", "127.0.0.1", "--webhook-url", url]
+        out = io.StringIO()
+        self.addCleanup(setattr, smtp_sink, "webhook", None)
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(smtp_sink.asyncio, "start_server", start_server),
+            contextlib.redirect_stdout(out),
+            self.assertRaises(Stop),
+        ):
+            asyncio.run(smtp_sink.main())
+        self.addCleanup(smtp_sink.webhook.stop, REPLY_TIMEOUT)
+        self.assertIn("sending to webhook https://hooks.example.test:8443 (POST)", out.getvalue())
+        self.assertNotIn("s3cret", out.getvalue())
+        self.assertNotIn("t0ken", out.getvalue())
 
     def test_only_the_url_is_needed(self):
         code, _ = self.run_main("--webhook-url", "https://hooks.example.test/mail")
