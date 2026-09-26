@@ -503,12 +503,17 @@ def content_parts(msg):
 
 
 def attachment_name(part):
-    """A part's filename, or None. A malformed RFC 2231 name is not fatal."""
+    """A part's filename, or None. A malformed RFC 2231 name is not fatal.
+
+    `get_filename` decodes RFC 2231, the standard way to put a non-ASCII name
+    in a parameter, but Gmail and Outlook use RFC 2047 encoded words there
+    instead, which it leaves alone, so those are decoded here.
+    """
     try:
         name = part.get_filename()
     except (HeaderParseError, LookupError, UnicodeError, ValueError, TypeError):
         return None
-    return None if name is None else clean(str(name))
+    return None if name is None else clean(header_text(str(name)))
 
 
 def is_attachment(part):

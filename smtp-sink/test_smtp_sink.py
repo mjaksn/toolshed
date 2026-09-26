@@ -1334,6 +1334,18 @@ class WebhookPayloadTests(unittest.TestCase):
         self.assertEqual(message["subject"], "caf� �")
         self.assertEqual(message["headers"][1]["value"], "�")
 
+    def test_a_non_ascii_filename_is_decoded_either_way_it_is_sent(self):
+        body = (
+            'Content-Type: multipart/mixed; boundary="M"\r\n\r\n'
+            "--M\r\nContent-Type: application/pdf\r\n"
+            'Content-Disposition: attachment; filename="=?utf-8?B?UmVwb3J0IE3DvG5jaGVuLnBkZg==?="\r\n\r\nx\r\n'
+            "--M\r\nContent-Type: application/pdf\r\n"
+            "Content-Disposition: attachment; filename*=utf-8''Bericht%20M%C3%BCnchen.pdf\r\n\r\nx\r\n"
+            "--M--\r\n"
+        ).encode("ascii")
+        names = [a["filename"] for a in smtp_sink.webhook_payload(delivery(body))["message"]["attachments"]]
+        self.assertEqual(names, ["Report München.pdf", "Bericht München.pdf"])
+
     def test_one_malformed_part_costs_its_field_not_the_delivery(self):
         # Each of these once raised out of webhook_payload, and the receiver
         # got nothing, raw message and envelope included.
