@@ -158,6 +158,9 @@ RestartSec=$restart_sec
 [Install]
 WantedBy=multi-user.target
 EOF
+# Readable by anyone whatever root's umask, so uninstall.sh can list it
+# without root.
+chmod 644 -- "$path"
 
 systemctl daemon-reload
 systemctl enable --quiet -- "$unit"

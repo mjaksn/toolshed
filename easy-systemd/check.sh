@@ -103,6 +103,7 @@ runs() { ps -o args= -p "$(main_pid "$1")" | grep -qxF -- "$2"; }
 first_line_is_marker() { [[ $(head -n1 "$(unit_file "$1")") == "$marker" ]]; }
 holds() { [[ -s $1 && $(cat "$1") == "$2" ]]; }
 lists() { bash uninstall.sh | grep -qx "  $1"; }
+lists_without_root() { as_nobody uninstall.sh | grep -qx "  $1"; }
 dead() { ! kill -0 "$1" 2>/dev/null; }
 gone() {
     [[ ! -e $(unit_file "$1") ]] && ! systemctl is-enabled --quiet -- "$1.service" 2>/dev/null
@@ -147,6 +148,10 @@ SUDO_USER=nobody run_install -d "$work" es-check-default -- sleep infinity
 expect "the user defaults to whoever ran sudo" grep -qx 'User=nobody' "$(unit_file es-check-default)"
 run_install -d "$work" es-check-default -- sleep infinity
 expect "and to root without sudo" grep -qx 'User=root' "$(unit_file es-check-default)"
+(umask 077 && run_install -d "$work" es-check-umask -- sleep infinity)
+expect "a unit written under umask 077 is still readable by anyone" \
+    test "$(stat -c %a "$(unit_file es-check-umask)")" = 644
+expect "so listing needs no root" lists_without_root es-check-umask
 # Before any unit runs as nobody, because verify loads every unit there is and
 # warns about that one.
 expect "systemd-analyze verify accepts the unit" systemd-analyze verify "$(unit_file es-check-default)"
