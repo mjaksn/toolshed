@@ -141,6 +141,18 @@ echo "$marker" >"$tmp/elsewhere.service"
 ln -s "$tmp/elsewhere.service" "$(unit_file es-check-link)"
 refuses "a symbolic link" "is a symbolic link" run_install es-check-link -- sleep 1
 expect "and leaves what it points to as it was" test "$(wc -l <"$tmp/elsewhere.service")" -eq 1
+# Paths ending in a line break, each beside the same path without one, which is
+# what resolving it with a plain $(...) would quietly turn it into.
+nl=$'\n'
+mkdir "$tmp/nl" "$tmp/nl$nl"
+for f in "$tmp/nl/run" "$tmp/nl$nl/run" "$tmp/run" "$tmp/run$nl"; do
+    printf '#!/bin/sh\n' >"$f"
+    chmod 755 "$f"
+done
+refuses "a directory whose name ends in a line break" "line break" \
+    run_install -d "$tmp/nl$nl" es-check-x -- sleep 1
+refuses "a command in such a directory" "line break" run_install es-check-x -- "$tmp/nl$nl/run"
+refuses "a command whose name ends in a line break" "line break" run_install es-check-x -- "$tmp/run$nl"
 expect "nothing was installed by any of these" test ! -e "$(unit_file es-check-x)"
 
 echo "Installing"

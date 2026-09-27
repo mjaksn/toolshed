@@ -100,19 +100,26 @@ for env in "${envs[@]}"; do
         || die "-e takes KEY=VALUE, the KEY made of letters, digits and '_': $env"
 done
 
+# A $(...) drops trailing line breaks, which would quietly turn one path into
+# another. Each one below prints a dot after its answer, which is then taken
+# off again, so a line break survives to be refused by the check after them.
 [[ -d $workdir ]] || die "no such directory: $workdir"
-workdir=$(cd -- "$workdir" && pwd)
+workdir=$(cd -- "$workdir" && pwd && echo .)
+workdir=${workdir%$'\n.'}
 
 exe=$1
 shift
 if [[ $exe != */* ]]; then
-    found=$(type -P -- "$exe") || die "not found on PATH: $exe"
-    exe=$found
+    found=$(type -P -- "$exe" && echo .) || die "not found on PATH: $exe"
+    exe=${found%$'\n.'}
 elif [[ $exe != /* ]]; then
     exe=$workdir/$exe
 fi
 [[ -f $exe && -x $exe ]] || die "not an executable file: $exe"
-exe=$(cd -- "$(dirname -- "$exe")" && pwd)/$(basename -- "$exe")
+dir=${exe%/*}
+dir=$(cd -- "${dir:-/}" && pwd && echo .)
+dir=${dir%$'\n.'}
+exe=${dir%/}/${exe##*/}
 
 for arg in "$exe" "$@" "$workdir" "${envs[@]}"; do
     [[ $arg != *$'\n'* ]] || die "a line break cannot be written into a unit file"
