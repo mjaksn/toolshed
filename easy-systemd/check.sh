@@ -174,10 +174,14 @@ expect "every environment variable arrives as it was given" \
 
 echo "Restarting"
 run_install -d "$work" -s 1 es-check-restart -- sleep infinity
-eventually running es-check-restart
-first=$(main_pid es-check-restart)
-kill "$first"
-expect "a killed service is started again" eventually restarted es-check-restart "$first"
+# Only once it is up: a MainPID of 0 would make the kill signal this script.
+if eventually running es-check-restart; then
+    first=$(main_pid es-check-restart)
+    kill "$first"
+    expect "a killed service is started again" eventually restarted es-check-restart "$first"
+else
+    not_ok "a killed service is started again (it never started)"
+fi
 
 echo "Reinstalling"
 printf '#!/bin/sh\nexec sleep 1000\n' >"$work/run.sh"
