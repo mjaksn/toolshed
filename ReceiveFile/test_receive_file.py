@@ -47,7 +47,11 @@ def eventually(condition: Callable[[], bool], seconds: float = 5.0) -> bool:
 class ReceiveFileTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.directory = Path(self.tmp.name)
+        # The directory saved into sits inside one of the test's own, so that
+        # anything written beside it rather than in it can be seen.
+        self.root = Path(self.tmp.name)
+        self.directory = self.root / "incoming"
+        self.directory.mkdir()
         self.server = receive_file.Server(("127.0.0.1", 0), self.directory)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever,
@@ -157,13 +161,18 @@ class ReceiveFileTest(unittest.TestCase):
         self.assert_still_serving()
 
     def test_names_that_are_not_plain_file_names_are_refused(self) -> None:
+        # sub exists, so a path into it would be saved there if one got
+        # through, rather than failing for want of the directory.
+        sub = self.directory / "sub"
+        sub.mkdir()
         for name in ["", ".", "..", "sub/x.txt", "../x.txt", "sub\\x.txt", "x\0y",
                      "D:escape.txt", "C:x.txt", "x.txt:stream"]:
             with self.subTest(name=name):
                 status, _ = self.upload(name, b"data")
                 self.assertEqual(status, 400)
-        self.assertEqual(list(self.directory.iterdir()), [])
-        self.assertFalse((self.directory.parent / "x.txt").exists())
+        self.assertEqual([path.name for path in self.directory.iterdir()], ["sub"])
+        self.assertEqual(list(sub.iterdir()), [])
+        self.assertEqual([path.name for path in self.root.iterdir()], ["incoming"])
         self.assert_still_serving()
 
     def test_an_upload_not_from_the_page_is_refused(self) -> None:
