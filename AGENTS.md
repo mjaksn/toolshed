@@ -67,7 +67,7 @@ arrival whatever else a change touched. CI installs ruff from
 version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-Ten tools have a check. `cd dispatch-desk && ./check.ps1` runs
+Eleven tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and then `test.ps1`, and takes about a
 minute the first time, because it fetches the analyzer and the YAML parser,
 and seconds afterwards from the cache. It passes with nothing reported and 88
@@ -94,7 +94,12 @@ syslog tests replace the logger or the connect with a mock, or open their own
 loopback listener, and the webhook tests run a small HTTP server of their own
 on the loopback address. They take about four seconds, or about ten on
 Windows, where each of the two refused loopback connections in the syslog
-tests costs two seconds.
+tests costs two seconds. `cd easy-systemd && bash ./check.sh` installs,
+reinstalls, restarts and removes real services named `es-check-*` and checks
+what each one runs. It needs Linux booted with systemd, and root, which it
+takes with sudo when started without it, and it removes everything it
+created on the way out, pass or fail. It takes about six seconds; it cannot
+run on Windows itself, and was run under WSL.
 Every one of these was run in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
