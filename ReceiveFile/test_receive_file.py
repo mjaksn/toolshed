@@ -12,7 +12,10 @@ from __future__ import annotations
 import contextlib
 import http.client
 import io
+import os
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -23,6 +26,9 @@ from pathlib import Path
 from unittest import mock
 
 import receive_file
+
+# Where receive_file.py is, for running it in a separate process.
+HERE = Path(__file__).resolve().parent
 
 # What the page sends with an upload, which the server insists on.
 UPLOAD_HEADER = {"X-ReceiveFile": "upload"}
@@ -248,7 +254,9 @@ class ReceiveFileTest(unittest.TestCase):
             stack.enter_context(mock.patch.object(receive_file, "lan_address",
                                                   return_value=None))
             stack.enter_context(contextlib.redirect_stdout(out))
+            safe_output = stack.enter_context(mock.patch.object(receive_file, "safe_output"))
             status = receive_file.main()
+        safe_output.assert_called_once_with()
         return status, out.getvalue()
 
     def test_ctrl_c_before_a_save_says_nothing_was_saved(self) -> None:
@@ -262,6 +270,18 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn(f"Saved {saved}", out)
         self.assertNotIn("Nothing", out)
+
+    def test_a_name_the_console_cannot_show_is_printed_escaped(self) -> None:
+        # As when output is redirected on Windows, in a code page with no way
+        # to write the name, which must not fail the run after the save.
+        script = ("import receive_file\n"
+                  "receive_file.safe_output()\n"
+                  "print('Saved \\u8d44\\u6599.txt')\n")
+        env = dict(os.environ, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+        result = subprocess.run([sys.executable, "-c", script], cwd=HERE, env=env,
+                                capture_output=True, timeout=30, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), b"Saved \u8d44\u6599.txt")
 
     def test_nothing_more_is_saved_once_a_file_has_been(self) -> None:
         # As an upload waiting on the lock finds it, when another has just

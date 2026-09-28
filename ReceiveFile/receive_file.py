@@ -312,7 +312,20 @@ def lan_address() -> str | None:
         return None
 
 
+def safe_output() -> None:
+    """Escapes what the console cannot show, rather than failing on it.
+
+    Output redirected on Windows is written in the ANSI code page, which has
+    no way to write most names outside western Europe, and printing one would
+    otherwise fail after the file had been saved.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
+
 def main() -> int:
+    safe_output()
     directory = Path.cwd()
     try:
         server = Server(("", PORT), directory)
