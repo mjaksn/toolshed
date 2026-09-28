@@ -88,7 +88,7 @@ shift
 
 [[ $EUID -eq 0 ]] || die "must be run as root, for example with sudo"
 [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
-    || die "NAME may hold only letters, digits, '_', '.' and '-': $name"
+    || die "NAME must start with a letter or digit, then hold only letters, digits, '_', '.' and '-': $name"
 case $restart in
     no|always|on-success|on-failure|on-abnormal|on-abort|on-watchdog) ;;
     *) die "unknown restart policy: $restart" ;;

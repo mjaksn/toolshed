@@ -125,8 +125,9 @@ gone() {
 mapfile -t existing < <(bash uninstall.sh | sed -n 's/^  //p' | grep -v '^es-check-')
 
 echo "Refusals"
-refuses "a name with a space" "NAME may hold" run_install 'es check' -- sleep 1
-refuses "a template name" "NAME may hold" run_install 'es-check@x' -- sleep 1
+refuses "a name with a space" "NAME must start" run_install 'es check' -- sleep 1
+refuses "a template name" "NAME must start" run_install 'es-check@x' -- sleep 1
+refuses "a name starting with '_'" "NAME must start with a letter or digit" run_install _es-check -- sleep 1
 refuses "an unknown restart policy" "unknown restart policy" run_install -r sometimes es-check-x -- sleep 1
 refuses "a fractional restart delay" "whole number" run_install -s 1.5 es-check-x -- sleep 1
 refuses "a user that does not exist" "no such user" run_install -u es-check-nobody es-check-x -- sleep 1
