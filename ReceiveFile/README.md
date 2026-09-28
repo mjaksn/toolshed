@@ -56,6 +56,11 @@ It listens on every network interface, because the usual point is to send a
 file from another device, and it asks for no password. Run it on a network you
 trust, and only while you are expecting the file.
 
+Uploads are taken only from its own page, whose script marks them with a
+header. A web page from anywhere else, open in a browser on this network while
+it runs, cannot add that header without a check the server never passes, so it
+cannot use up the one upload.
+
 The page is plain HTTP, so the file crosses the network unencrypted.
 
 ## What it needs

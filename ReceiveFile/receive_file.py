@@ -62,7 +62,8 @@ document.getElementById("form").addEventListener("submit", async (event) => {
   message.textContent = "Uploading " + file.files[0].name;
   try {
     const response = await fetch("/?name=" + encodeURIComponent(dest.value),
-                                 {method: "POST", body: file.files[0]});
+                                 {method: "POST", body: file.files[0],
+                                  headers: {"X-ReceiveFile": "upload"}});
     message.textContent = await response.text();
     if (response.ok) {
       file.disabled = true;
@@ -135,6 +136,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if length < 0:
             self.reply(400, "The upload gave a negative length.")
+            return
+        # Only this page's own script sends this. A page from anywhere else
+        # open in a browser that can reach the server cannot add it without
+        # first asking, in a preflight request this server does not answer,
+        # so it cannot use up the one upload.
+        if self.headers.get("X-ReceiveFile") != "upload":
+            self.refuse(length, 403, "Uploads are taken only from ReceiveFile's own page.")
             return
 
         # One upload at a time, so that only one can ever be saved.

@@ -24,6 +24,9 @@ from unittest import mock
 
 import receive_file
 
+# What the page sends with an upload, which the server insists on.
+UPLOAD_HEADER = {"X-ReceiveFile": "upload"}
+
 
 def eventually(condition: Callable[[], bool], seconds: float = 5.0) -> bool:
     """Waits for condition to hold, and says whether it did in time."""
@@ -52,18 +55,21 @@ class ReceiveFileTest(unittest.TestCase):
         self.server.server_close()
         self.tmp.cleanup()
 
-    def request(self, method: str, path: str,
-                body: bytes | None = None) -> tuple[int, str]:
+    def request(self, method: str, path: str, body: bytes | None = None,
+                headers: dict[str, str] | None = None) -> tuple[int, str]:
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         try:
-            connection.request(method, path, body=body)
+            connection.request(method, path, body=body, headers=headers or {})
             response = connection.getresponse()
             return response.status, response.read().decode()
         finally:
             connection.close()
 
-    def upload(self, name: str, body: bytes) -> tuple[int, str]:
-        return self.request("POST", "/?name=" + urllib.parse.quote(name, safe=""), body)
+    def upload(self, name: str, body: bytes,
+               headers: dict[str, str] | None = None) -> tuple[int, str]:
+        """Uploads as the page does, with its header unless others are given."""
+        return self.request("POST", "/?name=" + urllib.parse.quote(name, safe=""), body,
+                            UPLOAD_HEADER if headers is None else headers)
 
     def raw(self, data: bytes) -> bytes:
         """Sends bytes as written, then reads whatever comes back."""
@@ -106,6 +112,7 @@ class ReceiveFileTest(unittest.TestCase):
         # The name box is filled from the picked file, and is what is sent.
         self.assertIn("dest.value = file.files.length ? file.files[0].name", page)
         self.assertIn('"/?name=" + encodeURIComponent(dest.value)', page)
+        self.assertIn('headers: {"X-ReceiveFile": "upload"}', page)
 
     def test_any_other_path_is_not_found(self) -> None:
         self.assertEqual(self.request("GET", "/favicon.ico")[0], 404)
@@ -153,6 +160,19 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertFalse((self.directory.parent / "x.txt").exists())
         self.assert_still_serving()
 
+    def test_an_upload_not_from_the_page_is_refused(self) -> None:
+        # As a page from anywhere else would send it, with no way to add the
+        # header without a preflight request this server does not answer.
+        for headers in ({}, {"X-ReceiveFile": "something else"}):
+            with self.subTest(headers=headers):
+                status, text = self.upload("forged.txt", b"data", headers)
+                self.assertEqual(status, 403)
+                self.assertIn("own page", text)
+        self.assertEqual(self.request("OPTIONS", "/")[0], 501)
+        self.assertEqual(list(self.directory.iterdir()), [])
+        self.assertIsNone(self.server.saved)
+        self.assert_still_serving()
+
     def test_windows_device_names_are_refused_everywhere(self) -> None:
         # On Windows these open a device, so NUL would throw the upload away
         # and report it saved. Any case, any extension, spaces before the dot.
@@ -183,7 +203,7 @@ class ReceiveFileTest(unittest.TestCase):
         self.assert_still_serving()
 
     def test_an_upload_cut_short_leaves_nothing_behind(self) -> None:
-        reply = self.raw(b"POST /?name=part.bin HTTP/1.1\r\nHost: t\r\n"
+        reply = self.raw(b"POST /?name=part.bin HTTP/1.1\r\nHost: t\r\nX-ReceiveFile: upload\r\n"
                          b"Content-Length: 100\r\n\r\n" + b"x" * 10)
         self.assertIn(b"stopped after 10 of 100 bytes", reply)
         self.assertEqual(list(self.directory.iterdir()), [])
@@ -193,7 +213,7 @@ class ReceiveFileTest(unittest.TestCase):
         # What Ctrl+C does, while a file is still arriving.
         partial = self.directory / "big.bin"
         with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
-            sock.sendall(b"POST /?name=big.bin HTTP/1.1\r\nHost: t\r\n"
+            sock.sendall(b"POST /?name=big.bin HTTP/1.1\r\nHost: t\r\nX-ReceiveFile: upload\r\n"
                          b"Content-Length: 1000000\r\n\r\n" + b"x" * 1000)
             self.assertTrue(eventually(partial.exists))
             self.server.abort()
