@@ -89,8 +89,9 @@ hand is the way to keep a unit from ever being touched by `uninstall.sh`.
 
 ## What it needs
 
-bash, systemd 240 or later (from 2018, and in every current distribution),
-and root. Nothing to install. The only files either script
+bash, systemd 240 or later, and root. Nothing to install. That rules out RHEL
+8 and its rebuilds, such as Rocky Linux and AlmaLinux 8, which ship systemd
+239. The only files either script
 writes or deletes are its own unit files in `/etc/systemd/system`, and
 `systemctl` does the rest.
 
