@@ -139,7 +139,8 @@ class ReceiveFileTest(unittest.TestCase):
         body = bytes(range(256)) * 5000
         status, text = self.upload("copy of data.bin", body)
         self.assertEqual(status, 200)
-        self.assertIn("Saved copy of data.bin", text)
+        # The README promises the page says what was saved and how big it is.
+        self.assertIn(f"Saved copy of data.bin ({len(body)} bytes)", text)
         self.assertEqual((self.directory / "copy of data.bin").read_bytes(), body)
         self.thread.join(5)
         self.assertFalse(self.thread.is_alive())
