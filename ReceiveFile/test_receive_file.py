@@ -34,6 +34,14 @@ HERE = Path(__file__).resolve().parent
 UPLOAD_HEADER = {"X-ReceiveFile": "upload"}
 
 
+def unused_drive() -> str:
+    """A drive letter with no drive behind it on this machine."""
+    for letter in "ZYXWVUTSRQPONMLKJIHG":
+        if not os.path.exists(f"{letter}:\\"):
+            return letter
+    raise unittest.SkipTest("every drive letter from G to Z is in use")
+
+
 def eventually(condition: Callable[[], bool], seconds: float = 5.0) -> bool:
     """Waits for condition to hold, and says whether it did in time."""
     deadline = time.monotonic() + seconds
@@ -165,8 +173,12 @@ class ReceiveFileTest(unittest.TestCase):
         # through, rather than failing for want of the directory.
         sub = self.directory / "sub"
         sub.mkdir()
+        # A name on another drive uses one with no drive behind it, so that if
+        # the checks ever let it through it fails rather than writing there.
+        # One on this drive would land here, where the listing below sees it.
+        this_drive = self.directory.drive or "C:"
         for name in ["", ".", "..", "sub/x.txt", "../x.txt", "sub\\x.txt", "x\0y",
-                     "D:escape.txt", "C:x.txt", "x.txt:stream"]:
+                     f"{unused_drive()}:escape.txt", f"{this_drive}x.txt", "x.txt:stream"]:
             with self.subTest(name=name):
                 status, _ = self.upload(name, b"data")
                 self.assertEqual(status, 400)
