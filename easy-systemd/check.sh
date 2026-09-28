@@ -177,6 +177,11 @@ expect "the marker is the first line" first_line_is_marker es-check-sleep
 pid=$(main_pid es-check-sleep)
 expect "it runs as the user asked for" test "$(ps -o user= -p "$pid")" = nobody
 expect "in the directory asked for" test "$(readlink "/proc/$pid/cwd")" = "$work"
+printf '#!/bin/sh\nexec sleep 1000\n' >"$work/private.sh"
+chmod 700 "$work/private.sh"
+refuses "a command only root can run, for a service run as nobody" "could not start" \
+    run_install -d "$work" -u nobody es-check-noexec -- ./private.sh
+expect "and leaves it installed to be looked at" test -e "$(unit_file es-check-noexec)"
 expect "the command is resolved to a full path" \
     grep -qx 'ExecStart="/[^"]*/sleep" "infinity"' "$(unit_file es-check-sleep)"
 

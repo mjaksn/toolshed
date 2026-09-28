@@ -160,6 +160,9 @@ After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
+# Starting it waits until the command has actually been run, so a user who
+# cannot reach the directory or run the command fails the start.
+Type=exec
 User=$user
 WorkingDirectory=${workdir//'%'/'%%'}
 ${environment}ExecStart=$exec_start
@@ -175,7 +178,8 @@ chmod 644 -- "$path"
 
 systemctl daemon-reload
 systemctl enable --quiet -- "$unit"
-systemctl restart -- "$unit"
+systemctl restart -- "$unit" \
+    || die "$unit is installed but could not start; 'systemctl status $name' says why, and 'sudo ./uninstall.sh $name' removes it"
 
 printf -v shown '%q ' "$exe" "$@"
 cat <<EOF

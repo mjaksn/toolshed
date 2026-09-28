@@ -52,10 +52,15 @@ new settings and restarts it. It refuses a NAME already taken by a unit it did
 not create, including the ones the system ships, so it cannot quietly replace
 `ssh` or `cron`, and it refuses to write through a symbolic link.
 
-The chosen user needs to be able to enter the working directory. Installing
-from inside your home directory as another user, or as yourself from a
-directory only root can read, gets a service that fails at once; `systemctl
-status NAME` says so.
+The chosen user needs to be able to enter the working directory and run the
+command. If it cannot, as when installing from inside your home directory as
+another user, `install.sh` says the service could not start and exits with an
+error, leaving it installed so that `systemctl status NAME` can say why. A
+command that starts and then exits is another matter: that is only seen
+afterwards, in `systemctl status NAME`.
+
+A working directory whose name ends in a space or tab is refused, because
+systemd trims the end of that setting and there is no way to quote it.
 
 ## Removing
 
@@ -84,7 +89,8 @@ hand is the way to keep a unit from ever being touched by `uninstall.sh`.
 
 ## What it needs
 
-bash, systemd, and root. Nothing to install. The only files either script
+bash, systemd 240 or later (from 2018, and in every current distribution),
+and root. Nothing to install. The only files either script
 writes or deletes are its own unit files in `/etc/systemd/system`, and
 `systemctl` does the rest.
 
@@ -103,6 +109,9 @@ After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
+# Starting it waits until the command has actually been run, so a user who
+# cannot reach the directory or run the command fails the start.
+Type=exec
 User=app
 WorkingDirectory=/opt/app
 Environment="PORT=8080"
