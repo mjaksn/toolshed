@@ -21,7 +21,8 @@ Ctrl+C stops it without receiving anything.
 The name box fills in with the picked file's name, and can be changed to save
 it as something else. After the upload the page says what was saved and how
 big it is, the program prints where it saved it, and it exits with status 0.
-Stopped with Ctrl+C before anything arrives, it exits with status 1.
+Stopped with Ctrl+C before a file has been saved, it exits with status 1, and
+an upload still arriving at the time is not kept.
 
 ## Changing the port
 
@@ -40,7 +41,7 @@ ReceiveFile included, it says so and exits with status 1 rather than starting.
 - Never over a file that is already there. The page says so, and a different
   name can be given and the upload tried again without restarting anything.
 - Never part of a file. An upload that stops short is deleted, and the program
-  carries on waiting.
+  carries on waiting. One still arriving when Ctrl+C is pressed is deleted too.
 
 Only one file is ever saved: once one has been, any other upload is refused.
 The file is written to disk as it arrives rather than held in memory, so its

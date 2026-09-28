@@ -12,6 +12,7 @@ only.
 from __future__ import annotations
 
 import http.server
+import select
 import socket
 import sys
 import threading
@@ -27,6 +28,12 @@ CHUNK = 1024 * 1024
 # How long a connection may sit idle, in seconds, before it is dropped, so a
 # client that stalls partway through an upload cannot hold the server forever.
 IDLE_TIMEOUT = 60
+
+# How long Ctrl+C waits, in seconds, for an upload it cut off to clear up.
+ABORT_WAIT = 10
+
+# How often, in seconds, an upload waiting for data checks whether to stop.
+POLL = 0.25
 
 # The script sends the file as the raw body of the POST, with the name to save
 # it as in the query string, which lets the server stream it straight to disk.
@@ -104,6 +111,9 @@ def unusable(name: str) -> str | None:
 class Handler(http.server.BaseHTTPRequestHandler):
     server: Server
     timeout = IDLE_TIMEOUT
+    # Unbuffered, so that waiting on the socket says whether there is more to
+    # read: a buffer could hold data the wait cannot see. See read_some().
+    rbufsize = 0
 
     def do_GET(self) -> None:
         if urllib.parse.urlsplit(self.path).path != "/":
@@ -125,59 +135,86 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # One upload at a time, so that only one can ever be saved.
         with self.server.lock:
-            if self.server.saved is not None:
-                self.refuse(length, 503, "A file has already been received.")
-                return
-            reason = unusable(name)
-            if reason:
-                self.refuse(length, 400, reason)
-                return
-            target = self.server.directory / name
-            # Whatever else the platform makes of a name, it must land here.
-            if target.parent != self.server.directory or target.name != name:
-                self.refuse(length, 400, f"{name!r} is not a plain file name.")
-                return
-            created = False
-            try:
-                # "x" creates it, and fails if it is there already, in one step.
-                with open(target, "xb") as out:
-                    created = True
-                    received = self.copy(out, length)
-            except FileExistsError:
-                self.refuse(length, 409, f"A file called {name!r} is already there. "
-                                         "Choose another name.")
-                return
-            except OSError as error:
-                if not created:
-                    self.refuse(length, 400, f"Cannot save as {name!r}: {error.strerror}.")
-                    return
-                target.unlink(missing_ok=True)
-                self.try_reply(500, f"Receiving {name!r} failed, so nothing was kept: {error}.")
-                return
-            if received < length:
-                target.unlink(missing_ok=True)
-                self.try_reply(400, f"The upload stopped after {received} of "
-                                    f"{length} bytes, so nothing was kept.")
-                return
+            saved = self.receive(name, length)
+        if saved:
+            # Stopping does not wait on the sender hearing about it: the file
+            # is saved, and a sender that has gone must not keep it running.
+            self.try_reply(200, f"Saved {name} ({length} bytes). ReceiveFile has now stopped.")
+            # shutdown() waits for serve_forever() to return, which it cannot
+            # do while this handler is running, so it has to be another thread.
+            threading.Thread(target=self.server.shutdown).start()
 
-            self.server.saved = target
-        # Stopping does not wait on the sender hearing about it: the file is
-        # saved, and a sender that has gone must not keep the server running.
-        self.try_reply(200, f"Saved {name} ({length} bytes). ReceiveFile has now stopped.")
-        # shutdown() waits for serve_forever() to return, which it cannot do
-        # while this handler is still running, so it has to be another thread.
-        threading.Thread(target=self.server.shutdown).start()
+    def receive(self, name: str, length: int) -> bool:
+        """Saves the body as name and says so, or refuses it and says why."""
+        if self.server.stopping:
+            self.refuse(length, 503, "ReceiveFile is stopping.")
+            return False
+        if self.server.saved is not None:
+            self.refuse(length, 503, "A file has already been received.")
+            return False
+        reason = unusable(name)
+        if reason:
+            self.refuse(length, 400, reason)
+            return False
+        target = self.server.directory / name
+        # Whatever else the platform makes of a name, it must land here.
+        if target.parent != self.server.directory or target.name != name:
+            self.refuse(length, 400, f"{name!r} is not a plain file name.")
+            return False
+        created = False
+        try:
+            # "x" creates it, and fails if it is there already, in one step.
+            with open(target, "xb") as out:
+                created = True
+                received = self.copy(out, length)
+        except FileExistsError:
+            self.refuse(length, 409, f"A file called {name!r} is already there. "
+                                     "Choose another name.")
+            return False
+        except OSError as error:
+            if not created:
+                self.refuse(length, 400, f"Cannot save as {name!r}: {error.strerror}.")
+                return False
+            target.unlink(missing_ok=True)
+            self.try_reply(500, f"Receiving {name!r} failed, so nothing was kept: {error}.")
+            return False
+        if received < length:
+            target.unlink(missing_ok=True)
+            self.try_reply(400, f"The upload stopped after {received} of "
+                                f"{length} bytes, so nothing was kept.")
+            return False
+        self.server.saved = target
+        return True
 
     def copy(self, out, length: int) -> int:
         """Copies up to length bytes of the body into out, and says how many."""
         received = 0
         while received < length:
-            chunk = self.rfile.read(min(CHUNK, length - received))
+            chunk = self.read_some(min(CHUNK, length - received))
             if not chunk:
                 break
             out.write(chunk)
             received += len(chunk)
         return received
+
+    def read_some(self, limit: int) -> bytes:
+        """Reads up to limit bytes of the body as they arrive, or b"" at its end.
+
+        It waits in short steps rather than blocking in one read, so that it
+        notices the server stopping even while a sender is slow or has
+        stalled; a read blocked in another thread cannot be woken the same
+        way on every platform. It gives up once nothing has arrived for
+        IDLE_TIMEOUT seconds.
+        """
+        waited = 0.0
+        while True:
+            if self.server.stopping:
+                raise ConnectionAbortedError("ReceiveFile is stopping")
+            if select.select([self.connection], [], [], POLL)[0]:
+                return self.rfile.read(limit)
+            waited += POLL
+            if waited >= IDLE_TIMEOUT:
+                raise TimeoutError(f"nothing arrived for {IDLE_TIMEOUT} seconds")
 
     def refuse(self, length: int, status: int, text: str) -> None:
         """Replies after reading the body and throwing it away.
@@ -189,12 +226,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             remaining = length
             while remaining:
-                chunk = self.rfile.read(min(CHUNK, remaining))
+                chunk = self.read_some(min(CHUNK, remaining))
                 if not chunk:
-                    return
+                    break
                 remaining -= len(chunk)
         except OSError:
-            return
+            # Stopping, or the sender has gone: the reply is still worth a try.
+            pass
         self.try_reply(status, text)
 
     def try_reply(self, status: int, text: str) -> None:
@@ -233,6 +271,19 @@ class Server(http.server.ThreadingHTTPServer):
         self.directory = directory
         self.lock = threading.Lock()
         self.saved: Path | None = None
+        self.stopping = False
+
+    def abort(self) -> None:
+        """Stops for good, keeping nothing that has not finished arriving.
+
+        An upload in progress sees the server stopping at its next read and
+        deletes what it had written, and this waits for that before
+        returning, so the program cannot exit and leave part of a file
+        behind. Uploads waiting their turn are refused.
+        """
+        self.stopping = True
+        if self.lock.acquire(timeout=ABORT_WAIT):
+            self.lock.release()
 
 
 def lan_address() -> str | None:
@@ -263,12 +314,15 @@ def main() -> int:
         address = lan_address()
         if address:
             print(f"  http://{address}:{PORT}/")
-        print("Ctrl+C stops it without receiving anything.")
+        print("Ctrl+C stops it. An upload still arriving is not kept.")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            print("Stopped. Nothing was received.")
-            return 1
+            server.abort()
+    # Ctrl+C can land just after a file was saved, in which case it was.
+    if server.saved is None:
+        print("Stopped. Nothing was saved.")
+        return 1
     print(f"Saved {server.saved}")
     return 0
 

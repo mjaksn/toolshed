@@ -9,16 +9,30 @@ HTTP to it. Nothing leaves the machine.
 
 from __future__ import annotations
 
+import contextlib
 import http.client
+import io
 import socket
 import tempfile
 import threading
+import time
 import unittest
 import urllib.parse
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
 import receive_file
+
+
+def eventually(condition: Callable[[], bool], seconds: float = 5.0) -> bool:
+    """Waits for condition to hold, and says whether it did in time."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()
 
 
 class ReceiveFileTest(unittest.TestCase):
@@ -163,6 +177,60 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertIn(b"stopped after 10 of 100 bytes", reply)
         self.assertEqual(list(self.directory.iterdir()), [])
         self.assert_still_serving()
+
+    def test_stopping_mid_upload_keeps_nothing(self) -> None:
+        # What Ctrl+C does, while a file is still arriving.
+        partial = self.directory / "big.bin"
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
+            sock.sendall(b"POST /?name=big.bin HTTP/1.1\r\nHost: t\r\n"
+                         b"Content-Length: 1000000\r\n\r\n" + b"x" * 1000)
+            self.assertTrue(eventually(partial.exists))
+            self.server.abort()
+            self.assertFalse(partial.exists())
+        self.assertIsNone(self.server.saved)
+        self.assertEqual(self.upload("later.txt", b"late")[0], 503)
+        self.assertEqual(list(self.directory.iterdir()), [])
+
+    def run_main(self, saved: Path | None) -> tuple[int, str]:
+        """Runs main() as far as a Ctrl+C, with saved as what had been saved."""
+
+        class Interrupted:
+            def __init__(self, address: tuple[str, int], directory: Path) -> None:
+                self.saved = None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+            def serve_forever(self) -> None:
+                raise KeyboardInterrupt
+
+            def abort(self) -> None:
+                # As an upload that finishes while Ctrl+C is handled.
+                self.saved = saved
+
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(receive_file, "Server", Interrupted))
+            stack.enter_context(mock.patch.object(receive_file, "lan_address",
+                                                  return_value=None))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            status = receive_file.main()
+        return status, out.getvalue()
+
+    def test_ctrl_c_before_a_save_says_nothing_was_saved(self) -> None:
+        status, out = self.run_main(None)
+        self.assertEqual(status, 1)
+        self.assertIn("Nothing was saved", out)
+
+    def test_ctrl_c_just_after_a_save_still_reports_it(self) -> None:
+        saved = self.directory / "done.txt"
+        status, out = self.run_main(saved)
+        self.assertEqual(status, 0)
+        self.assertIn(f"Saved {saved}", out)
+        self.assertNotIn("Nothing", out)
 
     def test_nothing_more_is_saved_once_a_file_has_been(self) -> None:
         # As an upload waiting on the lock finds it, when another has just
