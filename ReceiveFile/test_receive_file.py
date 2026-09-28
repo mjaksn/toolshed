@@ -293,7 +293,7 @@ class ReceiveFileTest(unittest.TestCase):
         result = subprocess.run([sys.executable, "-c", script], cwd=HERE, env=env,
                                 capture_output=True, timeout=30, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), b"Saved \u8d44\u6599.txt")
+        self.assertEqual(result.stdout.strip(), rb"Saved \u8d44\u6599.txt")
 
     def test_nothing_more_is_saved_once_a_file_has_been(self) -> None:
         # As an upload waiting on the lock finds it, when another has just
