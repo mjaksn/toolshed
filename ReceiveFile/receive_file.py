@@ -72,6 +72,14 @@ document.getElementById("form").addEventListener("submit", async (event) => {
 """
 
 
+# Names Windows keeps for devices, in any folder, in any case and whatever
+# follows a dot. Saving as NUL would throw the file away and report it saved.
+# They are refused everywhere, so a name works or not whatever the platform.
+DEVICES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
+    f"{port}{number}" for port in ("COM", "LPT") for number in "0123456789¹²³"
+}
+
+
 def unusable(name: str) -> str | None:
     """Why a name cannot be saved as, or None when it can.
 
@@ -88,6 +96,8 @@ def unusable(name: str) -> str | None:
     # that drive, or a hidden stream inside a file, as in name:stream.
     if ":" in name:
         return f"{name!r} has a colon in it, which a file name cannot."
+    if name.split(".")[0].rstrip(" ").upper() in DEVICES:
+        return f"{name!r} is the name of a device on Windows, not a file."
     return None
 
 

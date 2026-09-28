@@ -33,6 +33,9 @@ top of `receive_file.py`.
 - Only a plain file name, never a path, so nothing lands outside the directory
   it was started in. A name with a `/`, `\` or `:` in it is refused, the colon
   because on Windows it names a drive or a hidden stream inside a file.
+- Never under a name Windows keeps for a device, such as `NUL`, `CON` or
+  `COM1`, with or without an extension, which would throw the file away. These
+  are refused on every platform, so a name is accepted or not wherever it runs.
 - Never over a file that is already there. The page says so, and a different
   name can be given and the upload tried again without restarting anything.
 - Never part of a file. An upload that stops short is deleted, and the program

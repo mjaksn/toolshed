@@ -124,6 +124,18 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertFalse((self.directory.parent / "x.txt").exists())
         self.assert_still_serving()
 
+    def test_windows_device_names_are_refused_everywhere(self) -> None:
+        # On Windows these open a device, so NUL would throw the upload away
+        # and report it saved. Any case, any extension, trailing spaces.
+        for name in ["NUL", "nul", "NUL ", "con.txt", "Aux.tar.gz", "COM1", "lpt9.log",
+                     "COM¹", "CONIN$"]:
+            with self.subTest(name=name):
+                status, text = self.upload(name, b"data")
+                self.assertEqual(status, 400)
+                self.assertIn("device", text)
+        self.assertEqual(list(self.directory.iterdir()), [])
+        self.assert_still_serving()
+
     def test_an_upload_without_a_length_is_refused(self) -> None:
         reply = self.raw(b"POST /?name=x.txt HTTP/1.1\r\nHost: t\r\n\r\n")
         self.assertTrue(reply.startswith(b"HTTP/1.0 411"), reply)
