@@ -166,7 +166,9 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertIn("Choose another name", text)
         self.assertEqual((self.directory / "taken.txt").read_bytes(), b"original")
-        self.assert_still_serving()
+        # The page says to choose another name, which then works.
+        self.assertEqual(self.upload("taken (2).txt", b"replacement")[0], 200)
+        self.assertEqual((self.directory / "taken (2).txt").read_bytes(), b"replacement")
 
     def test_names_that_are_not_plain_file_names_are_refused(self) -> None:
         # sub exists, so a path into it would be saved there if one got
@@ -246,7 +248,10 @@ class ReceiveFileTest(unittest.TestCase):
                          b"Content-Length: 100\r\n\r\n" + b"x" * 10)
         self.assertIn(b"stopped after 10 of 100 bytes", reply)
         self.assertEqual(list(self.directory.iterdir()), [])
-        self.assert_still_serving()
+        # Nothing was kept, so the same name is free for the upload to be tried
+        # again.
+        self.assertEqual(self.upload("part.bin", b"x" * 100)[0], 200)
+        self.assertEqual((self.directory / "part.bin").read_bytes(), b"x" * 100)
 
     def test_stopping_mid_upload_keeps_nothing(self) -> None:
         # What Ctrl+C does, while a file is still arriving.
