@@ -217,6 +217,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
+    # On Windows SO_REUSEADDR, which HTTPServer sets, lets a second program
+    # bind a port already in use, so a second ReceiveFile would start cleanly
+    # and never be sent anything. There the port is claimed exclusively
+    # instead, which makes a second one fail to start, as it does elsewhere.
+    allow_reuse_address = not hasattr(socket, "SO_EXCLUSIVEADDRUSE")
+
+    def server_bind(self) -> None:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def __init__(self, address: tuple[str, int], directory: Path) -> None:
         super().__init__(address, Handler)

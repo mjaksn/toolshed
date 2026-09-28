@@ -68,6 +68,21 @@ class ReceiveFileTest(unittest.TestCase):
     def test_the_port_is_3000_unless_edited(self) -> None:
         self.assertEqual(receive_file.PORT, 3000)
 
+    def test_a_second_server_cannot_take_a_port_in_use(self) -> None:
+        # On Windows the default socket options would let it, so the second
+        # would wait for a file that always goes to the first.
+        for host in ("127.0.0.1", ""):
+            with self.subTest(host=host), self.assertRaises(OSError):
+                receive_file.Server((host, self.port), self.directory).server_close()
+
+    def test_the_port_can_be_used_again_straight_after(self) -> None:
+        # Claiming the port exclusively must not stop the next run starting
+        # while the connections of the last are still closing.
+        self.assertEqual(self.upload("first.txt", b"1")[0], 200)
+        self.thread.join(5)
+        self.server.server_close()
+        receive_file.Server(("127.0.0.1", self.port), self.directory).server_close()
+
     def test_the_page_has_a_picker_a_name_box_and_a_button(self) -> None:
         status, page = self.request("GET", "/")
         self.assertEqual(status, 200)

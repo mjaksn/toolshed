@@ -26,7 +26,8 @@ Stopped with Ctrl+C before anything arrives, it exits with status 1.
 ## Changing the port
 
 It listens on port 3000. To use another, edit the `PORT = 3000` line near the
-top of `receive_file.py`.
+top of `receive_file.py`. If something else already has the port, another
+ReceiveFile included, it says so and exits with status 1 rather than starting.
 
 ## What it will and will not save
 
