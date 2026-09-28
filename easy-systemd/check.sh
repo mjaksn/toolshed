@@ -42,15 +42,26 @@ cp install.sh uninstall.sh "$tmp"
 chmod 644 "$tmp/install.sh" "$tmp/uninstall.sh"
 
 cleanup() {
-    local path
+    local status=$? path left
     for path in /etc/systemd/system/es-check-*.service; do
-        [[ -e $path ]] || continue
+        [[ -e $path || -L $path ]] || continue
         systemctl disable --now --quiet -- "$(basename -- "$path")" 2>/dev/null
         rm -f -- "$path"
     done
     systemctl daemon-reload
     systemctl reset-failed 'es-check-*' 2>/dev/null
     rm -rf -- "$tmp"
+    # Judged by what is left rather than by each step, since disabling a unit
+    # with no [Install] section complains when nothing is wrong. A run that
+    # leaves a service behind fails, however its tests went.
+    left=$(ls -d /etc/systemd/system/es-check-* 2>/dev/null
+           systemctl list-units --no-legend --plain 'es-check-*' 2>/dev/null)
+    if [[ -n $left ]]; then
+        echo "check.sh: the cleanup left these behind:" >&2
+        echo "$left" >&2
+        status=1
+    fi
+    exit "$status"
 }
 trap cleanup EXIT
 
