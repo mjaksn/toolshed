@@ -106,6 +106,10 @@ done
 [[ -d $workdir ]] || die "no such directory: $workdir"
 workdir=$(cd -- "$workdir" && pwd && echo .)
 workdir=${workdir%$'\n.'}
+# systemd trims WorkingDirectory= and has no quoting for it, so a trailing
+# space would name a different directory, or none.
+[[ $workdir != *[$' \t'] ]] \
+    || die "a working directory cannot end in a space or tab: '$workdir'"
 
 exe=$1
 shift

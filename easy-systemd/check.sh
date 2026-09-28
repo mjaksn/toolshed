@@ -153,6 +153,9 @@ refuses "a directory whose name ends in a line break" "line break" \
     run_install -d "$tmp/nl$nl" es-check-x -- sleep 1
 refuses "a command in such a directory" "line break" run_install es-check-x -- "$tmp/nl$nl/run"
 refuses "a command whose name ends in a line break" "line break" run_install es-check-x -- "$tmp/run$nl"
+mkdir "$tmp/ws" "$tmp/ws "
+refuses "a directory whose name ends in a space" "cannot end in a space" \
+    run_install -d "$tmp/ws " es-check-x -- sleep 1
 expect "nothing was installed by any of these" test ! -e "$(unit_file es-check-x)"
 
 echo "Installing"
