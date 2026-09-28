@@ -15,7 +15,7 @@ network, and waits:
 Waiting for one file, to save into /home/me/incoming
   http://localhost:3000/
   http://192.168.1.20:3000/
-Ctrl+C stops it without receiving anything.
+Ctrl+C stops it. An upload still arriving is not kept.
 ```
 
 The name box fills in with the picked file's name, and can be changed to save
@@ -81,9 +81,21 @@ bash ./check.sh
 
 This is what CI runs. It needs nothing installed: the tests start the real
 server on the loopback address, on a port the operating system picks, saving
-into a temporary directory, and talk HTTP to it. They cover the page, a file
-saved byte for byte and the server stopping after it, including when the
-sender has gone before the reply, an empty file, a name already taken, names
-that are paths or not names at all, an upload with no length and one cut
-short, and a second upload after the first was saved. They take about a
-second.
+into a temporary directory inside one of their own, and talk HTTP to it.
+
+They cover:
+- the page;
+- a file saved byte for byte, the reply giving its size, and the server
+  stopping after it, including when the sender has gone before the reply;
+- an empty file;
+- a name already taken, then another name tried;
+- names that are paths, have control characters, end in a dot or a space, or
+  are Windows device names;
+- an upload not sent from the page;
+- an upload with no length, and one cut short, then tried again;
+- Ctrl+C with an upload arriving, and just after a save;
+- a second server on a port in use, and the port used again straight after;
+- a name the console cannot show;
+- a second upload after the first was saved.
+
+They take about two seconds.

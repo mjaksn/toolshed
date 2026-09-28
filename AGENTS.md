@@ -99,9 +99,9 @@ what each one runs. It needs Linux booted with systemd, and root, which it
 takes with sudo when started without it, and it removes everything it
 created on the way out, pass or fail. It takes about six seconds; it cannot
 run on Windows itself, and was run under WSL. `cd ReceiveFile && bash
-./check.sh` runs that tool's 11 unittest tests with nothing to install; they
+./check.sh` runs that tool's 21 unittest tests with nothing to install; they
 start the real server on the loopback address, on a port the operating system
-picks, saving into a temporary directory, and take about a second.
+picks, saving into a temporary directory, and take about two seconds.
 Every one of these was run in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
