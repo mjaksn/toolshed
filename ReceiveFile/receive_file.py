@@ -103,6 +103,10 @@ def unusable(name: str) -> str | None:
     # that drive, or a hidden stream inside a file, as in name:stream.
     if ":" in name:
         return f"{name!r} has a colon in it, which a file name cannot."
+    # Windows drops these from the end of a name when it creates the file, so
+    # it would be saved under a different name from the one reported.
+    if name.endswith((".", " ")):
+        return f"{name!r} ends in a dot or a space, which Windows would drop."
     if name.split(".")[0].rstrip(" ").upper() in DEVICES:
         return f"{name!r} is the name of a device on Windows, not a file."
     return None

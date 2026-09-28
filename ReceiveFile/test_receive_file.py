@@ -155,13 +155,24 @@ class ReceiveFileTest(unittest.TestCase):
 
     def test_windows_device_names_are_refused_everywhere(self) -> None:
         # On Windows these open a device, so NUL would throw the upload away
-        # and report it saved. Any case, any extension, trailing spaces.
-        for name in ["NUL", "nul", "NUL ", "con.txt", "Aux.tar.gz", "COM1", "lpt9.log",
+        # and report it saved. Any case, any extension, spaces before the dot.
+        for name in ["NUL", "nul", "NUL .txt", "con.txt", "Aux.tar.gz", "COM1", "lpt9.log",
                      "COM¹", "CONIN$"]:
             with self.subTest(name=name):
                 status, text = self.upload(name, b"data")
                 self.assertEqual(status, 400)
                 self.assertIn("device", text)
+        self.assertEqual(list(self.directory.iterdir()), [])
+        self.assert_still_serving()
+
+    def test_names_ending_in_a_dot_or_space_are_refused(self) -> None:
+        # Windows would save report.pdf. as report.pdf, which is not the name
+        # the page and the terminal report.
+        for name in ["report.pdf.", "report.pdf ", "notes...", "x. "]:
+            with self.subTest(name=name):
+                status, text = self.upload(name, b"data")
+                self.assertEqual(status, 400)
+                self.assertIn("dot or a space", text)
         self.assertEqual(list(self.directory.iterdir()), [])
         self.assert_still_serving()
 

@@ -35,6 +35,8 @@ ReceiveFile included, it says so and exits with status 1 rather than starting.
 - Only a plain file name, never a path, so nothing lands outside the directory
   it was started in. A name with a `/`, `\` or `:` in it is refused, the colon
   because on Windows it names a drive or a hidden stream inside a file.
+- Never under a name ending in a dot or a space, which Windows would quietly
+  drop, saving the file under a different name from the one reported.
 - Never under a name Windows keeps for a device, such as `NUL`, `CON` or
   `COM1`, with or without an extension, which would throw the file away. These
   are refused on every platform, so a name is accepted or not wherever it runs.
