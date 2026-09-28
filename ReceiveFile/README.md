@@ -31,7 +31,8 @@ top of `receive_file.py`.
 ## What it will and will not save
 
 - Only a plain file name, never a path, so nothing lands outside the directory
-  it was started in. A name with a `/` or `\` in it is refused.
+  it was started in. A name with a `/`, `\` or `:` in it is refused, the colon
+  because on Windows it names a drive or a hidden stream inside a file.
 - Never over a file that is already there. The page says so, and a different
   name can be given and the upload tried again without restarting anything.
 - Never part of a file. An upload that stops short is deleted, and the program
