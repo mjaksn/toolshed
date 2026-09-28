@@ -97,7 +97,7 @@ esac
 id -u -- "$user" >/dev/null 2>&1 || die "no such user: $user"
 for env in "${envs[@]}"; do
     [[ $env == *=* && ${env%%=*} =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
-        || die "-e takes KEY=VALUE, the KEY made of letters, digits and '_': $env"
+        || die "-e takes KEY=VALUE, the KEY starting with a letter or '_', then holding only letters, digits and '_': $env"
 done
 
 # A $(...) drops trailing line breaks, which would quietly turn one path into

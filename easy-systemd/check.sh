@@ -137,6 +137,7 @@ refuses "a command not on PATH" "not found on PATH" run_install es-check-x -- es
 refuses "a path that is not executable" "not an executable" run_install -d "$work" es-check-x -- ./none.sh
 refuses "-e without =" "-e takes KEY=VALUE" run_install -e NOEQUALS es-check-x -- sleep 1
 refuses "-e with a bad key" "-e takes KEY=VALUE" run_install -e 'A-B=1' es-check-x -- sleep 1
+refuses "-e with a key starting with a digit" "KEY starting with a letter or '_'" run_install -e 1PORT=8080 es-check-x -- sleep 1
 refuses "a line break in an argument" "line break" run_install es-check-x -- sleep $'1\n2'
 refuses "running without root" "must be run as root" as_nobody install.sh es-check-x -- sleep 1
 refuses "a name the system already uses" "already exists elsewhere" run_install systemd-journald -- sleep 1
