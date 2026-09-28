@@ -84,6 +84,10 @@ def unusable(name: str) -> str | None:
         return f"{name!r} is not a file name."
     if "/" in name or "\\" in name or "\0" in name:
         return f"{name!r} is not a plain file name; a path cannot be given."
+    # On Windows a colon names a drive, as in D:name, which joins to a path on
+    # that drive, or a hidden stream inside a file, as in name:stream.
+    if ":" in name:
+        return f"{name!r} has a colon in it, which a file name cannot."
     return None
 
 
@@ -119,6 +123,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.refuse(length, 400, reason)
                 return
             target = self.server.directory / name
+            # Whatever else the platform makes of a name, it must land here.
+            if target.parent != self.server.directory or target.name != name:
+                self.refuse(length, 400, f"{name!r} is not a plain file name.")
+                return
             created = False
             try:
                 # "x" creates it, and fails if it is there already, in one step.

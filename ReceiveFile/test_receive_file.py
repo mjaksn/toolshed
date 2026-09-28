@@ -103,7 +103,8 @@ class ReceiveFileTest(unittest.TestCase):
         self.assert_still_serving()
 
     def test_names_that_are_not_plain_file_names_are_refused(self) -> None:
-        for name in ["", ".", "..", "sub/x.txt", "../x.txt", "sub\\x.txt", "x\0y"]:
+        for name in ["", ".", "..", "sub/x.txt", "../x.txt", "sub\\x.txt", "x\0y",
+                     "D:escape.txt", "C:x.txt", "x.txt:stream"]:
             with self.subTest(name=name):
                 status, _ = self.upload(name, b"data")
                 self.assertEqual(status, 400)
