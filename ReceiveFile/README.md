@@ -66,7 +66,8 @@ bash ./check.sh
 This is what CI runs. It needs nothing installed: the tests start the real
 server on the loopback address, on a port the operating system picks, saving
 into a temporary directory, and talk HTTP to it. They cover the page, a file
-saved byte for byte and the server stopping after it, an empty file, a name
-already taken, names that are paths or not names at all, an upload with no
-length and one cut short, and a second upload after the first was saved. They
-take about a second.
+saved byte for byte and the server stopping after it, including when the
+sender has gone before the reply, an empty file, a name already taken, names
+that are paths or not names at all, an upload with no length and one cut
+short, and a second upload after the first was saved. They take about a
+second.

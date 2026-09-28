@@ -151,7 +151,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             self.server.saved = target
-        self.reply(200, f"Saved {name} ({length} bytes). ReceiveFile has now stopped.")
+        # Stopping does not wait on the sender hearing about it: the file is
+        # saved, and a sender that has gone must not keep the server running.
+        self.try_reply(200, f"Saved {name} ({length} bytes). ReceiveFile has now stopped.")
         # shutdown() waits for serve_forever() to return, which it cannot do
         # while this handler is still running, so it has to be another thread.
         threading.Thread(target=self.server.shutdown).start()

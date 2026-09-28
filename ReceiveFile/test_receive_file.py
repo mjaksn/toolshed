@@ -16,6 +16,7 @@ import threading
 import unittest
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 import receive_file
 
@@ -89,6 +90,17 @@ class ReceiveFileTest(unittest.TestCase):
         self.thread.join(5)
         self.assertFalse(self.thread.is_alive())
         self.assertEqual(self.server.saved, self.directory / "copy of data.bin")
+
+    def test_the_server_stops_even_when_the_sender_has_gone(self) -> None:
+        # As when the sender disconnects between sending the file and reading
+        # the reply, so that writing the reply fails.
+        failing = mock.patch.object(receive_file.Handler, "reply",
+                                    side_effect=ConnectionResetError)
+        with failing, self.assertRaises(http.client.HTTPException):
+            self.upload("gone.txt", b"kept")
+        self.assertEqual((self.directory / "gone.txt").read_bytes(), b"kept")
+        self.thread.join(5)
+        self.assertFalse(self.thread.is_alive())
 
     def test_an_empty_file_is_saved(self) -> None:
         self.assertEqual(self.upload("empty.txt", b"")[0], 200)
