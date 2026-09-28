@@ -35,6 +35,9 @@ ReceiveFile included, it says so and exits with status 1 rather than starting.
 - Only a plain file name, never a path, so nothing lands outside the directory
   it was started in. A name with a `/`, `\` or `:` in it is refused, the colon
   because on Windows it names a drive or a hidden stream inside a file.
+- Never under a name with a control character in it, such as a line break or
+  the start of a terminal escape sequence, which would reach the terminal the
+  saved name is printed to.
 - Never under a name ending in a dot or a space, which Windows would quietly
   drop, saving the file under a different name from the one reported.
 - Never under a name Windows keeps for a device, such as `NUL`, `CON` or

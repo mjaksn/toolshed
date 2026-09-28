@@ -191,6 +191,18 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertEqual(list(self.directory.iterdir()), [])
         self.assert_still_serving()
 
+    def test_names_with_control_characters_are_refused(self) -> None:
+        # They would reach the terminal the saved name is printed to, where an
+        # escape sequence can rewrite what is on the screen.
+        for name in ["x\0y", "clear\x1b[2Jscreen.txt", "two\nlines.txt", "tab\t.txt",
+                     "del\x7f.txt"]:
+            with self.subTest(name=name):
+                status, text = self.upload(name, b"data")
+                self.assertEqual(status, 400)
+                self.assertIn("control character", text)
+        self.assertEqual(list(self.directory.iterdir()), [])
+        self.assert_still_serving()
+
     def test_names_ending_in_a_dot_or_space_are_refused(self) -> None:
         # Windows would save report.pdf. as report.pdf, which is not the name
         # the page and the terminal report.
