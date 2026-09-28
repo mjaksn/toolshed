@@ -1,0 +1,72 @@
+# ReceiveFile
+
+Receives one file from a browser and exits. It serves a small page with a file
+picker, a box for the name to save it as, and an upload button. The first file
+uploaded is saved into the directory it was started in, and then it stops.
+
+```
+python receive_file.py
+```
+
+It prints the addresses to open, one for this machine and one for others on the
+network, and waits:
+
+```
+Waiting for one file, to save into /home/me/incoming
+  http://localhost:3000/
+  http://192.168.1.20:3000/
+Ctrl+C stops it without receiving anything.
+```
+
+The name box fills in with the picked file's name, and can be changed to save
+it as something else. After the upload the page says what was saved and how
+big it is, the program prints where it saved it, and it exits with status 0.
+Stopped with Ctrl+C before anything arrives, it exits with status 1.
+
+## Changing the port
+
+It listens on port 3000. To use another, edit the `PORT = 3000` line near the
+top of `receive_file.py`.
+
+## What it will and will not save
+
+- Only a plain file name, never a path, so nothing lands outside the directory
+  it was started in. A name with a `/` or `\` in it is refused.
+- Never over a file that is already there. The page says so, and a different
+  name can be given and the upload tried again without restarting anything.
+- Never part of a file. An upload that stops short is deleted, and the program
+  carries on waiting.
+
+Only one file is ever saved: once one has been, any other upload is refused.
+The file is written to disk as it arrives rather than held in memory, so its
+size is limited only by the disk.
+
+## Who can send it a file
+
+Anyone who can reach this machine on that port, for as long as it is running.
+It listens on every network interface, because the usual point is to send a
+file from another device, and it asks for no password. Run it on a network you
+trust, and only while you are expecting the file.
+
+The page is plain HTTP, so the file crosses the network unencrypted.
+
+## What it needs
+
+Python 3.9 or later and nothing else, and a browser with JavaScript on the
+sending side, which fills in the name box and sends the file. It runs anywhere
+Python does. A firewall on the receiving machine may need to allow the port for
+another device to reach it.
+
+## Tests
+
+```
+bash ./check.sh
+```
+
+This is what CI runs. It needs nothing installed: the tests start the real
+server on the loopback address, on a port the operating system picks, saving
+into a temporary directory, and talk HTTP to it. They cover the page, a file
+saved byte for byte and the server stopping after it, an empty file, a name
+already taken, names that are paths or not names at all, an upload with no
+length and one cut short, and a second upload after the first was saved. They
+take about a second.
