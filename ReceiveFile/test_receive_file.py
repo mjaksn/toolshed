@@ -131,6 +131,8 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertIn("dest.value = file.files.length ? file.files[0].name", page)
         self.assertIn('"/?name=" + encodeURIComponent(dest.value)', page)
         self.assertIn('headers: {"X-ReceiveFile": "upload"}', page)
+        # Progress and results appear here later, so screen readers announce it.
+        self.assertIn('<p id="message" role="status">', page)
 
     def test_any_other_path_is_not_found(self) -> None:
         self.assertEqual(self.request("GET", "/favicon.ico")[0], 404)

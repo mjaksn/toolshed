@@ -44,7 +44,7 @@ PAGE = """<!doctype html>
   <p><label>Save as <input type="text" id="dest" size="40" required></label></p>
   <p><button id="upload">Upload</button></p>
 </form>
-<p id="message"></p>
+<p id="message" role="status"></p>
 <script>
 const file = document.getElementById("file");
 const dest = document.getElementById("dest");
