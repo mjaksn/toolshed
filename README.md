@@ -41,6 +41,9 @@ a repository of its own goes in here.
   project in two steps: it bumps the version everywhere it is recorded, writes
   the changelog entry and opens the pull request, then after the merge tags
   `main` and pushes the tag that triggers the release workflow.
+- [ReceiveFile](ReceiveFile/), a Python script that serves a page for uploading
+  one file from a browser, saves the first file sent under the name given, and
+  exits. Standard library only.
 - [RemoveNewline](RemoveNewline/), a PowerShell module whose one command strips
   every line break from a text file, in every form a line break takes, and
   keeps the encoding and byte order mark it found.
@@ -113,7 +116,7 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Eleven tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
+Twelve tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
 from the gallery and verified against a recorded hash rather than installed, so
 what the check ran against is the same module every time. That is the same
 arrangement the tool already uses for powershell-yaml at run time, and for the
@@ -123,14 +126,15 @@ that analyzer script pointed at its own directory, with its own settings file.
 same way and then run their own tests, written in plain PowerShell.
 `BasicUpsAdapter` runs its own test suite under `node --test`, with nothing to
 install first. `WinEvents` installs its test dependencies, pinned by version and
-hash, and runs `pytest`. `lock-hashes`, `ha-rest-yaml` and `smtp-sink` run
-their own tests under `unittest`, with nothing to install; the last of those
-starts the real server on the loopback address and speaks SMTP to it, so it
-needs no network and no privileges. `easy-systemd` is the exception to that:
-it installs, restarts and removes real services on the runner's own systemd
-and checks what each one ends up running, so it needs root, which it takes
-with `sudo`. Those last six each keep the command in a `check.sh` beside its
-`ci.json`, so the check CI runs is one a person can run too.
+hash, and runs `pytest`. `lock-hashes`, `ha-rest-yaml`, `smtp-sink` and
+`ReceiveFile` run their own tests under `unittest`, with nothing to install;
+the last two start their real servers on the loopback address and talk to them
+in SMTP and HTTP, so they need no network and no privileges. `easy-systemd` is
+the exception to that: it installs, restarts and removes real services on the
+runner's own systemd and checks what each one ends up running, so it needs
+root, which it takes with `sudo`. Those last seven each keep the command in a
+`check.sh` beside its `ci.json`, so the check CI runs is one a person can run
+too.
 
 ## Licence
 

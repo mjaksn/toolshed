@@ -50,24 +50,23 @@ tool is set up by following its own README.
 | Format | none configured |
 | Run | per tool, see its README |
 
-`ruff check .` was run in this checkout and passes. It covers six places
+`ruff check .` was run in this checkout and passes. It covers seven places
 now: `apitrace/apitrace.py`, which carries its own `apitrace/ruff.toml`
 switching off three stylistic rules for that one file with a reason beside
 each; the two files in `WinEvents`, which carry a `WinEvents/ruff.toml` of the
 same kind; the two files in `smtp-sink`, which carry a `smtp-sink/ruff.toml`
 turning off `BLE001` and `S110` for the handlers that keep one bad client or
 one failed forward from taking the server down, again with a reason beside
-each; the two files in
-`lock-hashes` and the five in `ha-rest-yaml`, which
-pass on the defaults and carry no `ruff.toml`; and `.github/changed_tools.py`,
-the CI plumbing. It runs
-repository-wide and unconditionally, so any Python that lands is linted on
-arrival whatever else a change touched. CI installs ruff from
+each; the two files in `lock-hashes`, the five in `ha-rest-yaml` and the two
+in `ReceiveFile`, which pass on the defaults and carry no `ruff.toml`; and
+`.github/changed_tools.py`, the CI plumbing. It runs repository-wide and
+unconditionally, so any Python that lands is linted on arrival whatever else a
+change touched. CI installs ruff from
 `.github/requirements-lint.txt`, pinned by version and hash, so the same
 version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-Eleven tools have a check. `cd dispatch-desk && ./check.ps1` runs
+Twelve tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and then `test.ps1`, and takes about a
 minute the first time, because it fetches the analyzer and the YAML parser,
 and seconds afterwards from the cache. It passes with nothing reported and 88
@@ -99,7 +98,10 @@ reinstalls, restarts and removes real services named `es-check-*` and checks
 what each one runs. It needs Linux booted with systemd, and root, which it
 takes with sudo when started without it, and it removes everything it
 created on the way out, pass or fail. It takes about six seconds; it cannot
-run on Windows itself, and was run under WSL.
+run on Windows itself, and was run under WSL. `cd ReceiveFile && bash
+./check.sh` runs that tool's 25 unittest tests with nothing to install; they
+start the real server on the loopback address, on a port the operating system
+picks, saving into a temporary directory, and take about two seconds.
 Every one of these was run in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
