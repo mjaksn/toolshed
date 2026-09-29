@@ -12,6 +12,7 @@ only.
 from __future__ import annotations
 
 import http.server
+import ipaddress
 import select
 import socket
 import sys
@@ -117,6 +118,39 @@ def unusable(name: str) -> str | None:
     return None
 
 
+WRONG_HOST = ("ReceiveFile answers only at this machine's own name or address, "
+              "such as the ones it printed when it started.")
+
+
+def direct_host(host: str | None) -> bool:
+    """Whether a Host header names this machine directly.
+
+    That is an IP address, localhost, or this machine's own name, which
+    covers every address the program prints. A web page elsewhere can point
+    a domain it controls at this machine's address, which makes the browser
+    treat the page and this server as one site, so that it sends the upload
+    header with no preflight to stop it. Such a request still names that
+    domain in Host, and is refused.
+    """
+    if not host:
+        return False
+    host = host.strip()
+    if host.startswith("["):
+        name = host[1:host.find("]")]
+    elif host.count(":") == 1:
+        name = host.split(":")[0]
+    else:
+        name = host
+    name = name.rstrip(".").lower()
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    here = socket.gethostname().lower()
+    return name in {"localhost", here, f"{here}.local", socket.getfqdn().lower()}
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server: Server
     timeout = IDLE_TIMEOUT
@@ -125,6 +159,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     rbufsize = 0
 
     def do_GET(self) -> None:
+        if not direct_host(self.headers.get("Host")):
+            self.reply(403, WRONG_HOST)
+            return
         if urllib.parse.urlsplit(self.path).path != "/":
             self.send_error(404)
             return
@@ -141,10 +178,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if length < 0:
             self.reply(400, "The upload gave a negative length.")
             return
+        if not direct_host(self.headers.get("Host")):
+            self.refuse(length, 403, WRONG_HOST)
+            return
         # Only this page's own script sends this. A page from anywhere else
         # open in a browser that can reach the server cannot add it without
         # first asking, in a preflight request this server does not answer,
-        # so it cannot use up the one upload.
+        # so it cannot use up the one upload. See direct_host() for a page
+        # that tries to pass as this one.
         if self.headers.get("X-ReceiveFile") != "upload":
             self.refuse(length, 403, "Uploads are taken only from ReceiveFile's own page.")
             return

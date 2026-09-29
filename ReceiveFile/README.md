@@ -66,6 +66,12 @@ header. A web page from anywhere else, open in a browser on this network while
 it runs, cannot add that header without a check the server never passes, so it
 cannot use up the one upload.
 
+Nor can one that points a domain of its own at this machine's address, which
+would make the browser treat it as the same site: the server answers only
+requests addressed to an IP address, `localhost`, or this machine's own name.
+So open it at one of the addresses it prints, or by the machine's name; a name
+for it given out by something else, such as a router's DNS, is refused.
+
 The page is plain HTTP, so the file crosses the network unencrypted.
 
 ## What it needs
@@ -93,7 +99,8 @@ They cover:
 - a name already taken, then another name tried;
 - names that are paths, have control characters, end in a dot or a space, or
   are Windows device names;
-- an upload not sent from the page;
+- an upload not sent from the page, and a request addressed to a domain
+  rather than this machine;
 - an upload with no length, and one cut short, then tried again;
 - Ctrl+C with an upload arriving, a slow one waited for however long, a
   second Ctrl+C, and Ctrl+C just after a save;

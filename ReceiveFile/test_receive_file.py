@@ -205,6 +205,26 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertIsNone(self.server.saved)
         self.assert_still_serving()
 
+    def test_a_request_through_someone_elses_domain_is_refused(self) -> None:
+        # As a page elsewhere would send once it had pointed a domain of its
+        # own at this machine, making the browser treat it as this site.
+        for host in ("evil.example", "evil.example:3000", "localhost.evil.example"):
+            with self.subTest(host=host):
+                self.assertEqual(self.request("GET", "/", headers={"Host": host})[0], 403)
+                status, text = self.upload("rebound.txt", b"data",
+                                           {**UPLOAD_HEADER, "Host": host})
+                self.assertEqual(status, 403)
+                self.assertIn("own name or address", text)
+        self.assertEqual(list(self.directory.iterdir()), [])
+        self.assertIsNone(self.server.saved)
+
+    def test_this_machines_own_names_and_addresses_are_answered(self) -> None:
+        name = socket.gethostname()
+        for host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}", "LOCALHOST",
+                     "192.168.1.20:3000", "[::1]:3000", name, f"{name}.local:3000"):
+            with self.subTest(host=host):
+                self.assertEqual(self.request("GET", "/", headers={"Host": host})[0], 200)
+
     def test_windows_device_names_are_refused_everywhere(self) -> None:
         # On Windows these open a device, so NUL would throw the upload away
         # and report it saved. Any case, any extension, spaces before the dot.
@@ -242,13 +262,13 @@ class ReceiveFileTest(unittest.TestCase):
         self.assert_still_serving()
 
     def test_an_upload_without_a_length_is_refused(self) -> None:
-        reply = self.raw(b"POST /?name=x.txt HTTP/1.1\r\nHost: t\r\n\r\n")
+        reply = self.raw(b"POST /?name=x.txt HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
         self.assertTrue(reply.startswith(b"HTTP/1.0 411"), reply)
         self.assertEqual(list(self.directory.iterdir()), [])
         self.assert_still_serving()
 
     def test_an_upload_cut_short_leaves_nothing_behind(self) -> None:
-        reply = self.raw(b"POST /?name=part.bin HTTP/1.1\r\nHost: t\r\nX-ReceiveFile: upload\r\n"
+        reply = self.raw(b"POST /?name=part.bin HTTP/1.1\r\nHost: 127.0.0.1\r\nX-ReceiveFile: upload\r\n"
                          b"Content-Length: 100\r\n\r\n" + b"x" * 10)
         self.assertIn(b"stopped after 10 of 100 bytes", reply)
         self.assertEqual(list(self.directory.iterdir()), [])
@@ -261,7 +281,7 @@ class ReceiveFileTest(unittest.TestCase):
         # What Ctrl+C does, while a file is still arriving.
         partial = self.directory / "big.bin"
         with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
-            sock.sendall(b"POST /?name=big.bin HTTP/1.1\r\nHost: t\r\nX-ReceiveFile: upload\r\n"
+            sock.sendall(b"POST /?name=big.bin HTTP/1.1\r\nHost: 127.0.0.1\r\nX-ReceiveFile: upload\r\n"
                          b"Content-Length: 1000000\r\n\r\n" + b"x" * 1000)
             self.assertTrue(eventually(partial.exists))
             self.server.abort()
