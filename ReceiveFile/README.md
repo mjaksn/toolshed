@@ -95,7 +95,8 @@ They cover:
   are Windows device names;
 - an upload not sent from the page;
 - an upload with no length, and one cut short, then tried again;
-- Ctrl+C with an upload arriving, and just after a save;
+- Ctrl+C with an upload arriving, a slow one waited for however long, a
+  second Ctrl+C, and Ctrl+C just after a save;
 - a second server on a port in use, and the port used again straight after;
 - a name the console cannot show;
 - a second upload after the first was saved.
