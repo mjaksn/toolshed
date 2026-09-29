@@ -221,7 +221,8 @@ class ReceiveFileTest(unittest.TestCase):
         # They would reach the terminal the saved name is printed to, where an
         # escape sequence can rewrite what is on the screen.
         for name in ["x\0y", "clear\x1b[2Jscreen.txt", "two\nlines.txt", "tab\t.txt",
-                     "del\x7f.txt"]:
+                     "del\x7f.txt",
+                     "next\x85line.txt", "csi\x9b2J.txt"]:
             with self.subTest(name=name):
                 status, text = self.upload(name, b"data")
                 self.assertEqual(status, 400)

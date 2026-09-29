@@ -16,6 +16,7 @@ import select
 import socket
 import sys
 import threading
+import unicodedata
 import urllib.parse
 from pathlib import Path
 
@@ -98,8 +99,10 @@ def unusable(name: str) -> str | None:
     if "/" in name or "\\" in name:
         return f"{name!r} is not a plain file name; a path cannot be given."
     # Line breaks, escape sequences and the like would reach the terminal the
-    # saved name is printed to, and Windows refuses most of them anyway.
-    if any(ord(char) < 32 or ord(char) == 127 for char in name):
+    # saved name is printed to, and Windows refuses most of them anyway. The
+    # Unicode class covers all three ranges: C0, DEL and C1, where U+009B
+    # starts an escape sequence much as ESC [ does.
+    if any(unicodedata.category(char) == "Cc" for char in name):
         return f"{name!r} has a control character in it."
     # On Windows a colon names a drive, as in D:name, which joins to a path on
     # that drive, or a hidden stream inside a file, as in name:stream.
