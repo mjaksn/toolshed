@@ -29,9 +29,6 @@ CHUNK = 1024 * 1024
 # client that stalls partway through an upload cannot hold the server forever.
 IDLE_TIMEOUT = 60
 
-# How long Ctrl+C waits, in seconds, for an upload it cut off to clear up.
-ABORT_WAIT = 10
-
 # How often, in seconds, an upload waiting for data checks whether to stop.
 POLL = 0.25
 
@@ -298,8 +295,12 @@ class Server(http.server.ThreadingHTTPServer):
         behind. Uploads waiting their turn are refused.
         """
         self.stopping = True
-        if self.lock.acquire(timeout=ABORT_WAIT):
-            self.lock.release()
+        # However long that takes, as on a stalled network drive. The wait is
+        # in short steps so that a second Ctrl+C can still end it, which
+        # a single blocking acquire does not allow on every platform.
+        while not self.lock.acquire(timeout=POLL):
+            pass
+        self.lock.release()
 
 
 def lan_address() -> str | None:
@@ -347,7 +348,12 @@ def main() -> int:
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            server.abort()
+            try:
+                server.abort()
+            except KeyboardInterrupt:
+                print("Stopped before an upload had finished clearing up, so part of "
+                      "it may be left behind.")
+                return 1
     # Ctrl+C can land just after a file was saved, in which case it was.
     if server.saved is None:
         print("Stopped. Nothing was saved.")

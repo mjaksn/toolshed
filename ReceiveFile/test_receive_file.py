@@ -267,8 +267,11 @@ class ReceiveFileTest(unittest.TestCase):
         self.assertEqual(self.upload("later.txt", b"late")[0], 503)
         self.assertEqual(list(self.directory.iterdir()), [])
 
-    def run_main(self, saved: Path | None) -> tuple[int, str]:
-        """Runs main() as far as a Ctrl+C, with saved as what had been saved."""
+    def run_main(self, saved: Path | None, again: bool = False) -> tuple[int, str]:
+        """Runs main() as far as a Ctrl+C, with saved as what had been saved.
+
+        With again, a second Ctrl+C lands while the first is clearing up.
+        """
 
         class Interrupted:
             def __init__(self, address: tuple[str, int], directory: Path) -> None:
@@ -284,6 +287,8 @@ class ReceiveFileTest(unittest.TestCase):
                 raise KeyboardInterrupt
 
             def abort(self) -> None:
+                if again:
+                    raise KeyboardInterrupt
                 # As an upload that finishes while Ctrl+C is handled.
                 self.saved = saved
 
@@ -302,6 +307,26 @@ class ReceiveFileTest(unittest.TestCase):
         status, out = self.run_main(None)
         self.assertEqual(status, 1)
         self.assertIn("Nothing was saved", out)
+
+    def test_stopping_waits_however_long_the_upload_takes_to_clear_up(self) -> None:
+        # As a handler slow to finish, writing to a stalled network drive. An
+        # earlier version gave up after a fixed wait, set tiny here so that
+        # it shows at once, and could exit with part of the file behind.
+        self.server.lock.acquire()
+        aborting = threading.Thread(target=self.server.abort)
+        with mock.patch.object(receive_file, "ABORT_WAIT", 0.2, create=True):
+            aborting.start()
+            time.sleep(1)
+            still_waiting = aborting.is_alive()
+            self.server.lock.release()
+            aborting.join(5)
+        self.assertTrue(still_waiting)
+        self.assertFalse(aborting.is_alive())
+
+    def test_a_second_ctrl_c_stops_at_once_and_says_so(self) -> None:
+        status, out = self.run_main(None, again=True)
+        self.assertEqual(status, 1)
+        self.assertIn("part of it may be left behind", out)
 
     def test_ctrl_c_just_after_a_save_still_reports_it(self) -> None:
         saved = self.directory / "done.txt"

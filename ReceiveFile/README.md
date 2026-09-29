@@ -22,7 +22,9 @@ The name box fills in with the picked file's name, and can be changed to save
 it as something else. After the upload the page says what was saved and how
 big it is, the program prints where it saved it, and it exits with status 0.
 Stopped with Ctrl+C before a file has been saved, it exits with status 1, and
-an upload still arriving at the time is not kept.
+an upload still arriving at the time is not kept: it waits for that upload to
+clear up, however long it takes. A second Ctrl+C stops it at once, and says
+that part of the upload may be left behind.
 
 ## Changing the port
 
