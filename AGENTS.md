@@ -57,7 +57,7 @@ each; the two files in `WinEvents`, which carry a `WinEvents/ruff.toml` of the
 same kind; the two files in `smtp-sink`, which carry a `smtp-sink/ruff.toml`
 turning off `BLE001` and `S110` for the handlers that keep one bad client or
 one failed forward from taking the server down, again with a reason beside
-each; the two files in `lock-hashes`, the five in `ha-rest-yaml` and the two
+each; the two files in `lock-hashes`, the six in `ha-rest-yaml` and the two
 in `ReceiveFile`, which pass on the defaults and carry no `ruff.toml`; and
 `.github/changed_tools.py`, the CI plumbing. It runs repository-wide and
 unconditionally, so any Python that lands is linted on arrival whatever else a
@@ -86,7 +86,7 @@ Node test suite with nothing to install, and `cd WinEvents && bash ./check.sh`
 installs the pinned test dependencies and runs pytest; the second is Windows
 only, because pywin32 is. `cd lock-hashes && bash ./check.sh` runs its
 unittest suite with nothing to install, `cd ha-rest-yaml && bash
-./check.sh` does the same for that tool's 4 tests, and `cd smtp-sink && bash
+./check.sh` does the same for that tool's 5 tests, and `cd smtp-sink && bash
 ./check.sh` does it for that tool's 151, which need no network: the server
 tests bind the loopback address on a port the operating system picks, the
 syslog tests replace the logger or the connect with a mock, or open their own

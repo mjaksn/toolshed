@@ -6,8 +6,9 @@
 
 Asks what to generate (a RESTful sensor, a RESTful binary sensor or a RESTful
 command), which authentication to leave placeholders for, and then which
-endpoint and value or parameters to use. Questions go to stderr and the YAML
-goes to stdout, so the snippet can be redirected into a file.
+endpoint and value or parameters to use. A command comes with a script that
+runs it, offering each parameter as a field. Questions go to stderr and the
+YAML goes to stdout, so the snippet can be redirected into a file.
 
 The document is trusted rather than validated. Only paths, parameters, request
 bodies, response bodies and the first server are read, and whatever is missing
@@ -34,7 +35,7 @@ import rest_sensor
 KINDS = [
     ("RESTful sensor", rest_sensor),
     ("RESTful binary sensor", rest_binary_sensor),
-    ("RESTful command", rest_command),
+    ("RESTful command, and a script to run it", rest_command),
 ]
 
 AUTH_KINDS = ["Basic", "Digest", "HTTP header"]
@@ -60,6 +61,9 @@ class Param:
     variable: str = ""
     # For a body property: the schema requires it whenever the body is sent.
     needed_with_body: bool = False
+    # The schema's type, such as string or boolean, or empty when it names none.
+    type: str = ""
+    description: str = ""
 
     @property
     def placeholder(self) -> str:
@@ -137,7 +141,10 @@ class Spec:
             location = raw.get("in")
             if raw.get("name") and location in ("path", "query", "header"):
                 required = location == "path" or bool(raw.get("required"))
-                params[(raw["name"], location)] = Param(raw["name"], location, required)
+                params[(raw["name"], location)] = Param(
+                    raw["name"], location, required,
+                    type=schema_type(self.merged(raw.get("schema"))), description=raw.get("description") or "",
+                )
         endpoint.params = list(params.values())
 
         body = self.resolve(operation.get("requestBody"))
@@ -148,21 +155,25 @@ class Spec:
             endpoint.body_required = bool(body.get("required"))
             schema = self.merged(media.get("schema"))
             # readOnly properties belong to responses only, so a request leaves them out.
-            properties = [
-                name for name, child in (schema.get("properties") or {}).items()
-                if not self.merged(child).get("readOnly")
-            ]
+            properties = {name: self.merged(child) for name, child in (schema.get("properties") or {}).items()}
+            properties = {name: child for name, child in properties.items() if not child.get("readOnly")}
             if endpoint.json_request and properties:
                 # A property the schema requires is only required outright when
                 # the body it belongs to has to be sent at all. Otherwise it is
                 # needed as soon as any part of the body is.
                 needed = set(schema.get("required") or [])
                 endpoint.params += [
-                    Param(name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed)
-                    for name in properties
+                    Param(
+                        name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed,
+                        type=schema_type(child), description=child.get("description") or "",
+                    )
+                    for name, child in properties.items()
                 ]
             else:
-                endpoint.params.append(Param("payload", "raw body", endpoint.body_required))
+                endpoint.params.append(Param(
+                    "payload", "raw body", endpoint.body_required,
+                    type=schema_type(schema), description=body.get("description") or "",
+                ))
         name_variables(endpoint.params)
 
         response = self.resolve(self.success_response(operation.get("responses")))
@@ -265,6 +276,16 @@ def walk_example(value, path, out, depth):
     elif path:
         kinds = {bool: "boolean", int: "integer", float: "number", str: "string"}
         out.append((path, kinds.get(type(value), "value")))
+
+
+def schema_type(schema: dict) -> str:
+    """The type a merged schema declares, ignoring null, or the one its keywords imply."""
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), None)
+    if not kind:
+        kind = "array" if "items" in schema else "object" if "properties" in schema else ""
+    return kind if isinstance(kind, str) else ""
 
 
 def name_variables(params: list[Param]) -> None:
@@ -419,7 +440,8 @@ def load(source: str, verify: bool = True) -> Spec:
 def main(argv: list[str] | None = None, console: Console | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate a Home Assistant RESTful sensor, binary sensor or"
-        " command YAML snippet from an OpenAPI 3 JSON document."
+        " command YAML snippet from an OpenAPI 3 JSON document. A command comes"
+        " with a script that runs it."
     )
     parser.add_argument(
         "spec", help="the OpenAPI document, as JSON: a file, or an http or https URL to fetch it from"

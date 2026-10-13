@@ -9,7 +9,9 @@ prints one of:
 - a [RESTful binary sensor](https://www.home-assistant.io/integrations/binary_sensor.rest),
   the same under `binary_sensor:`, on or off from one value;
 - a [RESTful command](https://www.home-assistant.io/integrations/rest_command),
-  an entry under `rest_command:` that calls the endpoint as an action.
+  an entry under `rest_command:` that calls the endpoint as an action, and
+  beside it a [script](https://www.home-assistant.io/integrations/script/)
+  under `script:` that runs the command with a field for each parameter.
 
 These are the per-platform integrations, not the combined
 [RESTful integration](https://www.home-assistant.io/integrations/rest/) under a
@@ -62,12 +64,53 @@ variable, filled from the data the action is called with, so a path parameter
 `zone` turns the URL into `.../zones/{{ zone | urlencode }}/...`. Query
 parameters go into the URL too, because `rest_command` has no `params` key.
 Values in the URL pass through `urlencode`, so an `&` or `#` in one stays part
-of the value, though a `/` is left as it is. The properties of a JSON request
-body count as parameters as well, and go into a JSON `payload`; once any of
-them is chosen, the ones the body's schema requires come along too. Two parameters
-whose names would make the same variable, such as a query and a header both
-called `id`, get the location added to tell them apart. The tool prints the
-name of each variable the action will want.
+of the value. The properties of a JSON request body count as parameters as
+well, and go into a JSON `payload`; once any of them is chosen, the ones the
+body's schema requires come along too. Two parameters whose names would make
+the same variable, such as a query and a header both called `id`, get the
+location added to tell them apart.
+
+An optional parameter is left out of the request when the action is not given
+it. When the query parameters or body properties included are all required,
+each is written into the URL or the payload by itself, and a `/` in a path or
+query value is left as it is. Once any of them is optional, the query string or
+the payload is instead one template building a dict of only the variables the
+action was given. Written that way, a query string encodes a `/` as well, and
+is a bare `?` when none of its parameters is given. `rest_command` has no way
+to leave a header out, so an optional header that is not given is sent empty.
+The tool prints which variables the action needs and which it can also be
+given.
+
+## The script
+
+Running the command from an automation means typing its data by hand in the
+automation editor. Running the script instead puts a field in the editor for
+each parameter, ready to fill in. The script is keyed like the command, with
+`_command` added when that would be `turn_on`, `turn_off` or `toggle`, which
+Home Assistant keeps for its own script actions.
+
+Each parameter the command includes becomes a field, keyed by its variable,
+named after the parameter, and described by where it goes, its type, and any
+description the document gives it. A boolean gets a boolean selector and
+anything else a text one. A field is required when the command must be given
+it, which matches the document: required parameters, and the body properties
+the schema requires once the body is sent. Home Assistant uses that only to
+mark the field in the editor; it still runs the script without it.
+
+The script hands its fields to the command as one template rendering a dict.
+That leaves out the blank ones, and keeps text as text, where a template for
+each key would turn a typed `123` into a number. A value bound for JSON is
+converted to the type the schema gives it: `int` for an integer, `float` for a
+number, `bool` for a boolean, and `from_json` for an array or object typed as
+text. A boolean bound for the URL or a header becomes `true` or `false`, where
+Python would write `True`. A value that does not convert stops the script with
+an error rather than sending something else.
+
+The default `configuration.yaml` already has `script: !include scripts.yaml`,
+and a second `script:` key will not load. Either move the entry under
+`script:` into `scripts.yaml`, without the `script:` line itself, or rename
+the key to something like `script rest:`, which Home Assistant reads as more
+scripts.
 
 ## What it trusts
 
@@ -79,9 +122,12 @@ first branch of `oneOf` or `anyOf`, and array `items`; when it yields nothing,
 the response's example is walked instead. Templates are not checked.
 
 The keys written were checked against the Home Assistant source at the
-2026.9.2 tag, in `homeassistant/components/rest` and
-`homeassistant/components/rest_command`, rather than against the documentation
-pages.
+2026.9.2 tag, in `homeassistant/components/rest`,
+`homeassistant/components/rest_command` and `homeassistant/components/script`,
+rather than against the documentation pages. How the templates render, and
+what a script's data becomes, was checked against
+`homeassistant/helpers/template` and `homeassistant/helpers/service.py` at the
+same tag.
 
 ## What it needs
 
@@ -93,7 +139,7 @@ document is given as a URL.
 `ha_rest_yaml.py` is the one to run. It reads the document, asks the questions
 common to all three, and writes the YAML. `rest_sensor.py`,
 `rest_binary_sensor.py` and `rest_command.py` each build the config for one
-integration.
+integration, and `command_script.py` builds the script beside a command.
 
 ## Tests
 
@@ -101,7 +147,8 @@ integration.
 python3 -m unittest
 ```
 
-4 tests, standard library only: one run of each kind against a small document,
-comparing the whole snippet, and one for where the base URL comes from. Nothing
-is fetched. `check.sh` runs exactly that and is what CI runs,
-on `ubuntu-latest`, per `ci.json`.
+5 tests, standard library only: one run of each kind against a small document,
+comparing the whole snippet, a second command whose script has boolean fields,
+and one for where the base URL comes from. Nothing is fetched. The tests compare
+the templates as written; they do not render them. `check.sh` runs exactly that
+and is what CI runs, on `ubuntu-latest`, per `ci.json`.

@@ -3,10 +3,11 @@
     python -m unittest
 
 One small document and one run per kind of YAML, each answering the questions
-from a script and comparing the whole snippet. Between them they cover a JSON
-response reached through $ref and allOf, a plain text response, parameters in
-the path, query, header and body, all three kinds of authentication, and the
-command line options.
+from a script and comparing the whole snippet, plus a second command. Between
+them they cover a JSON response reached through $ref and allOf, a plain text
+response, parameters in the path, query, header and body, optional ones left
+out when not given, the script beside a command with its field types and
+conversions, all three kinds of authentication, and the command line options.
 """
 
 from __future__ import annotations
@@ -46,6 +47,28 @@ SPEC = {
                                 "type": "object",
                                 "required": ["celsius"],
                                 "properties": {"celsius": {"type": "number"}, "mode": {"type": "string"}},
+                            }
+                        }
+                    }
+                },
+            },
+        },
+        "/fan": {
+            "post": {
+                "operationId": "toggle",
+                "parameters": [{"name": "dry", "in": "query", "required": True, "schema": {"type": "boolean"}}],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["speed", "on"],
+                                "properties": {
+                                    "speed": {"type": "integer", "description": "Percent."},
+                                    "on": {"type": "boolean"},
+                                    "label": {"type": "string"},
+                                },
                             }
                         }
                     }
@@ -139,21 +162,103 @@ binary_sensor:
         )
 
     def test_command_with_chosen_optional_parameters(self):
-        # Digest auth, the PUT endpoint, with the query, header and body optionals.
+        # Digest auth, the PUT endpoint, with the query, header and body optionals,
+        # which the query string and payload leave out when they are not given.
         self.assertEqual(
             self.run_tool("3", "2", "3", "1, 2, 3"),
             """\
 rest_command:
   set_target:
-    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?hold-for={{ hold_for | urlencode }}'
+    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?{{ dict({"hold-for": hold_for}.items() | rejectattr(1, "undefined")) | urlencode }}'
     method: put
     authentication: digest
     username: YOUR_USERNAME
     password: YOUR_PASSWORD
     headers:
       X-Trace: '{{ X_Trace }}'
-    payload: '{"celsius": {{ celsius | tojson }}, "mode": {{ mode | tojson }}}'
+    payload: '{{ dict({"celsius": celsius, "mode": mode}.items() | rejectattr(1, "undefined")) | tojson }}'
     content_type: application/json
+script:
+  set_target:
+    alias: setTarget
+    description: 'Calls rest_command.set_target, PUT /zones/{zone}/target.'
+    fields:
+      zone:
+        name: zone
+        description: 'Path parameter.'
+        required: true
+        selector:
+          text: {}
+      hold_for:
+        name: hold-for
+        description: 'Query parameter.'
+        required: false
+        selector:
+          text: {}
+      X_Trace:
+        name: X-Trace
+        description: Header.
+        required: false
+        selector:
+          text: {}
+      celsius:
+        name: celsius
+        description: 'Body property, number.'
+        required: true
+        selector:
+          text: {}
+      mode:
+        name: mode
+        description: 'Body property, string.'
+        required: false
+        selector:
+          text: {}
+    sequence:
+      - action: rest_command.set_target
+        data: '{{ dict({"zone": zone, "hold_for": hold_for, "X_Trace": X_Trace, "celsius": celsius | float if celsius is defined, "mode": mode}.items() | rejectattr(1, "undefined")) }}'
+""",
+        )
+
+    def test_command_script_with_boolean_fields(self):
+        # Header auth, the POST endpoint called toggle, with no optionals. A
+        # script cannot be called toggle, and booleans get the boolean selector.
+        self.assertEqual(
+            self.run_tool("3", "3", "4", ""),
+            """\
+rest_command:
+  toggle:
+    url: 'http://thermostat.local:8080/api/fan?dry={{ dry | urlencode }}'
+    method: post
+    headers:
+      Authorization: YOUR_HEADER_VALUE
+    payload: '{"speed": {{ speed | tojson }}, "on": {{ on | tojson }}}'
+    content_type: application/json
+script:
+  toggle_command:
+    alias: toggle
+    description: 'Calls rest_command.toggle, POST /fan.'
+    fields:
+      dry:
+        name: dry
+        description: 'Query parameter, boolean.'
+        required: true
+        selector:
+          boolean: {}
+      speed:
+        name: speed
+        description: 'Body property, integer. Percent.'
+        required: true
+        selector:
+          text: {}
+      'on':
+        name: 'on'
+        description: 'Body property, boolean.'
+        required: true
+        selector:
+          boolean: {}
+    sequence:
+      - action: rest_command.toggle
+        data: '{{ dict({"dry": dry | bool | lower if dry is defined, "speed": speed | int if speed is defined, "on": on | bool if on is defined}.items() | rejectattr(1, "undefined")) }}'
 """,
         )
 
