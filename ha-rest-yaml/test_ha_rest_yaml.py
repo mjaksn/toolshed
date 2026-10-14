@@ -7,10 +7,9 @@ from a script and comparing the whole snippet, plus a second command, the
 naming of variables and the type of a value whose schema allows several.
 Between them they cover a JSON response reached through $ref and allOf, a
 plain text response, parameters in the path, query, header and body, optional
-ones left out when not given, query arrays repeated or joined and objects
-spread by property, the script beside a command with its field types, defaults
-and conversions, all three kinds of authentication, and the command line
-options.
+ones left out when not given, query arrays and objects spread or joined, the
+script beside a command with its field types, defaults and conversions, all
+three kinds of authentication, and the command line options.
 """
 
 from __future__ import annotations
@@ -45,6 +44,7 @@ SPEC = {
                     {"name": "hold-for", "in": "query"},
                     {"name": "X-Trace", "in": "header"},
                     {"name": "zones", "in": "query", "explode": False, "schema": {"type": "array"}},
+                    {"name": "range", "in": "query", "style": "pipeDelimited", "explode": False, "schema": {"type": "object"}},
                 ],
                 "requestBody": {
                     "required": True,
@@ -175,13 +175,13 @@ binary_sensor:
     def test_command_with_chosen_optional_parameters(self):
         # Digest auth, the PUT endpoint, with the query, header and body optionals,
         # which the query string and payload leave out when they are not given,
-        # and a query array joined into one value.
+        # and a query array and object each joined into one value.
         self.assertEqual(
-            self.run_tool("3", "2", "3", "1, 2, 3, 4"),
+            self.run_tool("3", "2", "3", "1, 2, 3, 4, 5"),
             """\
 rest_command:
   set_target:
-    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?{% set query = [("hold-for", hold_for, "", ""), ("zones", zones, "", ",")] %}{% set q = namespace(pairs=[], parts=[]) %}{% for name, value, spread, sep in query if value is defined %}{% if value is mapping and (sep or spread in ("props", "deep")) %}{% set q.parts = [] %}{% for key, item in value.items() %}{% set item = item | lower if item is boolean else item %}{% set q.parts = q.parts + [(name, key ~ sep ~ item) if sep else (name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}{% endfor %}{% elif value is iterable and value is not string and value is not mapping and (sep or spread) %}{% set q.parts = [] %}{% for item in value %}{% set q.parts = q.parts + [(name, item | lower if item is boolean else item)] %}{% endfor %}{% else %}{% set q.parts = [(name, value | lower if value is boolean else value)] %}{% endif %}{% set q.pairs = q.pairs + ([(name, q.parts | map(attribute=1) | join(sep))] if sep else q.parts) %}{% endfor %}{{ q.pairs | urlencode }}'
+    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?{% set query = [("hold-for", hold_for, "", ""), ("zones", zones, "", ","), ("range", range_, "", "|")] %}{% set q = namespace(pairs=[], parts=[]) %}{% for name, value, spread, sep in query if value is defined %}{% if value is mapping and (sep or spread in ("props", "deep")) %}{% set q.parts = [] %}{% for key, item in value.items() %}{% set item = item | lower if item is boolean else item %}{% set q.parts = q.parts + [(name, key ~ sep ~ item) if sep else (name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}{% endfor %}{% elif value is iterable and value is not string and value is not mapping and (sep or spread) %}{% set q.parts = [] %}{% for item in value %}{% set q.parts = q.parts + [(name, item | lower if item is boolean else item)] %}{% endfor %}{% else %}{% set q.parts = [(name, value | lower if value is boolean else value)] %}{% endif %}{% set q.pairs = q.pairs + ([(name, q.parts | map(attribute=1) | join(sep))] if sep else q.parts) %}{% endfor %}{{ q.pairs | urlencode }}'
     method: put
     authentication: digest
     username: YOUR_USERNAME
@@ -219,6 +219,12 @@ script:
         required: false
         selector:
           text: {}
+      range_:
+        name: range
+        description: 'Query parameter, object.'
+        required: false
+        selector:
+          text: {}
       celsius:
         name: celsius
         description: 'Body property, number.'
@@ -234,7 +240,7 @@ script:
           text: {}
     sequence:
       - action: rest_command.set_target
-        data: '{{ dict({"zone": zone, "hold_for": hold_for, "X_Trace": X_Trace, "zones": zones | from_json if zones is string else zones, "celsius": celsius | float if celsius is defined, "mode": mode}.items() | rejectattr(1, "undefined")) }}'
+        data: '{{ dict({"zone": zone, "hold_for": hold_for, "X_Trace": X_Trace, "zones": zones | from_json if zones is string else zones, "range_": range_ | from_json if range_ is string else range_, "celsius": celsius | float if celsius is defined, "mode": mode}.items() | rejectattr(1, "undefined")) }}'
 """,
         )
 
