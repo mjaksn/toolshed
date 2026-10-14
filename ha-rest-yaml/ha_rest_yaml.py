@@ -269,14 +269,39 @@ class Spec:
         merged() keeps only the first branch of a oneOf or anyOf, which would
         convert a value to that branch's type when another branch allows it.
         """
-        resolved = self.resolve(schema)
-        kinds = set()
-        for branch in resolved.get("oneOf") or resolved.get("anyOf") or [schema]:
-            branch = self.merged(branch)
-            kind = branch.get("type")
-            kinds |= set(kind) if isinstance(kind, list) else {schema_type(branch)}
+        kinds = self.value_types(schema)
+        if kinds is None:
+            return ""
         kinds.discard("null")
         return kinds.pop() if len(kinds) == 1 else ""
+
+    def value_types(self, schema, depth=0):
+        """Every type a value of the schema may take, or None when it may take any.
+
+        A type list and every branch of a oneOf or anyOf add types, however
+        deeply they sit, and allOf keeps only the types all its parts allow.
+        """
+        if isinstance(schema, dict) and "$ref" in schema and len(schema) > 1:
+            siblings = {key: value for key, value in schema.items() if key != "$ref"}
+            schema = {**siblings, "allOf": [{"$ref": schema["$ref"]}, *siblings.get("allOf", [])]}
+        schema = self.resolve(schema)
+        if depth > 12:
+            return None
+        kind = schema.get("type")
+        if isinstance(kind, list):
+            kinds = {k for k in kind if isinstance(k, str)}
+        elif isinstance(kind, str):
+            kinds = {kind}
+        else:
+            implied = schema_type(schema)
+            kinds = {implied} if implied else None
+        for key in ("oneOf", "anyOf"):
+            if schema.get(key):
+                branches = [self.value_types(branch, depth + 1) for branch in schema[key]]
+                kinds = both(kinds, None if None in branches else set().union(*branches))
+        for part in schema.get("allOf") or []:
+            kinds = both(kinds, self.value_types(part, depth + 1))
+        return kinds
 
     def walk_schema(self, schema, path, out, depth):
         if depth > 12:
@@ -326,6 +351,16 @@ def schema_type(schema: dict) -> str:
     if not kind:
         kind = "array" if "items" in schema else "object" if "properties" in schema else ""
     return kind if isinstance(kind, str) else ""
+
+
+def both(a: set | None, b: set | None) -> set | None:
+    """The types two schemas both allow, where None allows any and an integer is a number."""
+    if a is None or b is None:
+        return b if a is None else a
+    common = a & b
+    if ("number" in a and "integer" in b) or ("integer" in a and "number" in b):
+        common.add("integer")
+    return common
 
 
 def name_variables(params: list[Param]) -> None:

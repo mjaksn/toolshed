@@ -109,8 +109,9 @@ text. A boolean bound for the URL or a header becomes `true` or `false`, where
 Python would write `True`. A value that does not convert stops the script with
 an error rather than sending something else. A schema allowing more than one
 type, through a list of types or a `oneOf` or `anyOf` whose branches differ,
-gives no one type to convert to, so its value gets a text field and is passed
-on as typed. A `null` alongside one other type does not count.
+even one nested inside an `allOf`, gives no one type to convert to, so its
+value gets a text field and is passed on as typed. A `null` alongside one other
+type does not count.
 
 The default `configuration.yaml` already has `script: !include scripts.yaml`,
 and a second `script:` key will not load. Either move the entry under

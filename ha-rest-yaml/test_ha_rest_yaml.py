@@ -279,6 +279,8 @@ script:
             ({"type": ["integer", "string"]}, ""),
             ({"oneOf": [{"type": "integer"}, {"type": "string"}]}, ""),
             ({"anyOf": [{"type": "string"}, {}]}, ""),
+            ({"allOf": [{"oneOf": [{"type": "integer"}, {"type": "string"}]}]}, ""),
+            ({"allOf": [{"type": ["integer", "string"]}, {"type": "number"}]}, "integer"),
             ({"anyOf": [{"type": "number"}, {"type": "null"}]}, "number"),
             ({"type": ["boolean", "null"]}, "boolean"),
             ({"$ref": "#/components/schemas/Count"}, "integer"),
