@@ -181,7 +181,7 @@ binary_sensor:
             """\
 rest_command:
   set_target:
-    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?{{ dict({"hold-for": hold_for, "zones": (zones | join(",") if zones is defined and zones is iterable and zones is not string else zones)}.items() | rejectattr(1, "undefined")) | urlencode }}'
+    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?{% set query = [("hold-for", hold_for, "", ""), ("zones", zones, "", ",")] %}{% set q = namespace(pairs=[], parts=[]) %}{% for name, value, spread, sep in query if value is defined %}{% if value is mapping and (sep or spread in ("props", "deep")) %}{% set q.parts = [] %}{% for key, item in value.items() %}{% set item = item | lower if item is boolean else item %}{% set q.parts = q.parts + [(name, key ~ sep ~ item) if sep else (name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}{% endfor %}{% elif value is iterable and value is not string and value is not mapping and (sep or spread) %}{% set q.parts = [] %}{% for item in value %}{% set q.parts = q.parts + [(name, item | lower if item is boolean else item)] %}{% endfor %}{% else %}{% set q.parts = [(name, value | lower if value is boolean else value)] %}{% endif %}{% set q.pairs = q.pairs + ([(name, q.parts | map(attribute=1) | join(sep))] if sep else q.parts) %}{% endfor %}{{ q.pairs | urlencode }}'
     method: put
     authentication: digest
     username: YOUR_USERNAME
@@ -248,7 +248,7 @@ script:
             """\
 rest_command:
   toggle:
-    url: 'http://thermostat.local:8080/api/fan?{% set query = [("dry", dry, ""), ("tags", tags, "each"), ("filter", filter, "deep")] %}{% set q = namespace(pairs=[]) %}{% for name, value, spread in query if value is defined %}{% if spread == "each" and value is iterable and value is not string and value is not mapping %}{% for item in value %}{% set q.pairs = q.pairs + [(name, item)] %}{% endfor %}{% elif spread in ("props", "deep") and value is mapping %}{% for key, item in value.items() %}{% set q.pairs = q.pairs + [(name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}{% endfor %}{% else %}{% set q.pairs = q.pairs + [(name, value)] %}{% endif %}{% endfor %}{{ q.pairs | urlencode }}'
+    url: 'http://thermostat.local:8080/api/fan?{% set query = [("dry", dry, "", ""), ("tags", tags, "each", ""), ("filter", filter, "deep", "")] %}{% set q = namespace(pairs=[], parts=[]) %}{% for name, value, spread, sep in query if value is defined %}{% if value is mapping and (sep or spread in ("props", "deep")) %}{% set q.parts = [] %}{% for key, item in value.items() %}{% set item = item | lower if item is boolean else item %}{% set q.parts = q.parts + [(name, key ~ sep ~ item) if sep else (name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}{% endfor %}{% elif value is iterable and value is not string and value is not mapping and (sep or spread) %}{% set q.parts = [] %}{% for item in value %}{% set q.parts = q.parts + [(name, item | lower if item is boolean else item)] %}{% endfor %}{% else %}{% set q.parts = [(name, value | lower if value is boolean else value)] %}{% endif %}{% set q.pairs = q.pairs + ([(name, q.parts | map(attribute=1) | join(sep))] if sep else q.parts) %}{% endfor %}{{ q.pairs | urlencode }}'
     method: post
     headers:
       Authorization: YOUR_HEADER_VALUE

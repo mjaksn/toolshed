@@ -75,30 +75,31 @@ when the parameter was left out.
 
 An optional parameter is left out of the request when the action is not given
 it. When the query parameters or body properties included are all required,
-and no query array or object is spread over several parameters, as below, each
-is written into the URL or the payload by itself, and a `/` in a path or query
-value is left as it is. Once any of them is optional, the query string or the
-payload is instead one template building a dict of only the variables the
-action was given. Written that way, a query string encodes a `/` as well, and
-is a bare `?` when none of its parameters is given. `rest_command` has no way
-to leave a header out, so an optional header that is not given is sent empty.
-The tool prints which variables the action needs and which it can also be
-given.
+and no query parameter is an array or object, as below, each is written into
+the URL or the payload by itself, and a `/` in a path or query value is left
+as it is. Once any of them is optional, the query string or the payload is
+instead one template building a dict of only the variables the action was
+given. Written that way, a query string encodes a `/` as well, and is a bare
+`?` when none of its parameters is given. `rest_command` has no way to leave a
+header out, so an optional header that is not given is sent empty. The tool
+prints which variables the action needs and which it can also be given.
 
 A query parameter that is an array or an object is sent as its `style` and
 `explode` say. By default it is spread over parameters of its own: an array
 repeats its name for each value, as `tags=a&tags=b`, and an object names one
 after each property, as `role=admin`, or as `filter[role]=admin` for
-`deepObject`. A dict cannot hold a name twice, so then the query string is one
-template gathering name and value pairs, which encodes a `/` and leaves out
-what was not given, as above. An empty list or mapping sends nothing, and a
-value that is not the list or mapping expected is sent as one parameter, as it
-is. With `explode: false` the values are joined into one parameter, an
-object's names among them, as `filter=role,admin`, by a comma, or a space for
-`spaceDelimited` or a `|` for `pipeDelimited`. Brackets and delimiters are
-percent-encoded with the rest, which a server decodes before reading them. An
-array or object in a path or header is sent as one value, as given, and a
-boolean inside a query array or object as Python writes it, `True` or `False`.
+`deepObject`. With `explode: false` its values are joined into one parameter
+instead, an object's names among them, as `filter=role,admin`, by a comma, or
+a space for `spaceDelimited` or a `|` for `pipeDelimited`. Either way the
+query string is then one template gathering name and value pairs a value at a
+time, since a dict cannot hold a name twice. Written that way it encodes a
+`/`, leaves out what was not given, as above, and writes a boolean as `true`
+or `false`, where Python would write `True`. An empty list or mapping sends
+nothing when spread and an empty value when joined, and a value that is not
+the list or mapping expected is sent as one parameter, as it is. Brackets and
+delimiters are percent-encoded with the rest, which a server decodes before
+reading them. An array or object in a path or header is sent as one value, as
+given.
 
 ## The script
 

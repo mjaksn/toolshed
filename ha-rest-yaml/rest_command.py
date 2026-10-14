@@ -47,12 +47,12 @@ def generate(endpoints, base_url, extra, console):
         r"\{([^}]*)\}", lambda m: "{{ " + path_variables[m.group(1)] + " | urlencode }}", endpoint.path
     )
     query = [p for p in params if p.location == "query"]
-    if any(p.spread for p in query):
+    if any(p.spread or p.delimiter for p in query):
         url += "?" + query_pairs(query)
     elif query and all(p in needed for p in query):
-        url += "?" + "&".join(f"{p.name}={{{{ {query_value(p)} | urlencode }}}}" for p in query)
+        url += "?" + "&".join(f"{p.name}={{{{ {p.variable} | urlencode }}}}" for p in query)
     elif query:
-        url += "?{{ " + given(query, query_value) + " | urlencode }}"
+        url += "?{{ " + given(query) + " | urlencode }}"
     config = {"url": url}
     if endpoint.method != "get":
         config["method"] = endpoint.method
@@ -96,45 +96,39 @@ def generate(endpoints, base_url, extra, console):
     return {"rest_command": {key: config}, "script": {script_key: script}}
 
 
-def given(params, value=lambda p: p.variable):
+def given(params):
     """A Jinja dict of each parameter's name and value, leaving out any the action was not given."""
-    pairs = ", ".join(f"{json.dumps(p.name)}: {value(p)}" for p in params)
+    pairs = ", ".join(f"{json.dumps(p.name)}: {p.variable}" for p in params)
     return f'dict({{{pairs}}}.items() | rejectattr(1, "undefined"))'
 
 
-def query_value(p):
-    """The Jinja expression for a query parameter's value, joining up an array or object sent as one parameter.
-
-    An object is joined as its names and values in turn, as role,admin,id,7.
-    """
-    v = p.variable
-    if not p.delimiter:
-        return v
-    d = json.dumps(p.delimiter)
-    if p.type == "object":
-        return f'({v}.items() | map("join", {d}) | join({d}) if {v} is defined and {v} is mapping else {v})'
-    return f"({v} | join({d}) if {v} is defined and {v} is iterable and {v} is not string else {v})"
-
-
 def query_pairs(query):
-    """Jinja writing the query string from name and value pairs, so an array or object can spread over several.
+    """Jinja writing the query string from name and value pairs, for when an array or object is among them.
 
-    A dict cannot hold the same name twice, so the pairs are gathered in a
-    namespace instead. Every variable is read in the first statement, before
-    the template sets a name of its own, so a parameter called q or name is not
-    hidden by one. A value that is not the list or mapping its spread expects
-    is sent as one parameter, as it is.
+    A dict cannot hold a name twice, so the pairs are gathered in a namespace
+    instead, a spread array or object adding one for each value or property,
+    and a joined one adding one for the lot. Going one value at a time is also
+    what lets a boolean be written true or false, where Python would write
+    True. Every variable is read in the first statement, before the template
+    sets a name of its own, so a parameter called q or name is not hidden by
+    one. A value that is not the list or mapping expected is sent as it is.
     """
-    rows = ", ".join(f"({json.dumps(p.name)}, {query_value(p)}, {json.dumps(p.spread)})" for p in query)
+    rows = ", ".join(
+        f"({json.dumps(p.name)}, {p.variable}, {json.dumps(p.spread)}, {json.dumps(p.delimiter)})" for p in query
+    )
     return (
-        f"{{% set query = [{rows}] %}}{{% set q = namespace(pairs=[]) %}}"
-        "{% for name, value, spread in query if value is defined %}"
-        '{% if spread == "each" and value is iterable and value is not string and value is not mapping %}'
-        "{% for item in value %}{% set q.pairs = q.pairs + [(name, item)] %}{% endfor %}"
-        '{% elif spread in ("props", "deep") and value is mapping %}'
-        "{% for key, item in value.items() %}"
-        '{% set q.pairs = q.pairs + [(name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}'
+        f"{{% set query = [{rows}] %}}{{% set q = namespace(pairs=[], parts=[]) %}}"
+        "{% for name, value, spread, sep in query if value is defined %}"
+        '{% if value is mapping and (sep or spread in ("props", "deep")) %}'
+        "{% set q.parts = [] %}{% for key, item in value.items() %}"
+        "{% set item = item | lower if item is boolean else item %}"
+        '{% set q.parts = q.parts + [(name, key ~ sep ~ item) if sep else (name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}'
         "{% endfor %}"
-        "{% else %}{% set q.pairs = q.pairs + [(name, value)] %}{% endif %}"
+        "{% elif value is iterable and value is not string and value is not mapping and (sep or spread) %}"
+        "{% set q.parts = [] %}{% for item in value %}"
+        "{% set q.parts = q.parts + [(name, item | lower if item is boolean else item)] %}"
+        "{% endfor %}"
+        "{% else %}{% set q.parts = [(name, value | lower if value is boolean else value)] %}{% endif %}"
+        "{% set q.pairs = q.pairs + ([(name, q.parts | map(attribute=1) | join(sep))] if sep else q.parts) %}"
         "{% endfor %}{{ q.pairs | urlencode }}"
     )
