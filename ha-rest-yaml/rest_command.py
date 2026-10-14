@@ -47,7 +47,7 @@ def generate(endpoints, base_url, extra, console):
         r"\{([^}]*)\}", lambda m: "{{ " + path_variables[m.group(1)] + " | urlencode }}", endpoint.path
     )
     query = [p for p in params if p.location == "query"]
-    if any(p.repeated for p in query):
+    if any(p.spread for p in query):
         url += "?" + query_pairs(query)
     elif query and all(p in needed for p in query):
         url += "?" + "&".join(f"{p.name}={{{{ {query_value(p)} | urlencode }}}}" for p in query)
@@ -103,26 +103,38 @@ def given(params, value=lambda p: p.variable):
 
 
 def query_value(p):
-    """The Jinja expression for a query parameter's value, joining up an array sent as one parameter."""
+    """The Jinja expression for a query parameter's value, joining up an array or object sent as one parameter.
+
+    An object is joined as its names and values in turn, as role,admin,id,7.
+    """
     v = p.variable
     if not p.delimiter:
         return v
-    return f"({v} | join({json.dumps(p.delimiter)}) if {v} is defined and {v} is iterable and {v} is not string else {v})"
+    d = json.dumps(p.delimiter)
+    if p.type == "object":
+        return f'({v}.items() | map("join", {d}) | join({d}) if {v} is defined and {v} is mapping else {v})'
+    return f"({v} | join({d}) if {v} is defined and {v} is iterable and {v} is not string else {v})"
 
 
 def query_pairs(query):
-    """Jinja writing the query string from name and value pairs, one pair for each value of a repeated array.
+    """Jinja writing the query string from name and value pairs, so an array or object can spread over several.
 
     A dict cannot hold the same name twice, so the pairs are gathered in a
     namespace instead. Every variable is read in the first statement, before
     the template sets a name of its own, so a parameter called q or name is not
-    hidden by one. A single value given for a repeated array is sent as is.
+    hidden by one. A value that is not the list or mapping its spread expects
+    is sent as one parameter, as it is.
     """
-    rows = ", ".join(f"({json.dumps(p.name)}, {query_value(p)}, {'true' if p.repeated else 'false'})" for p in query)
+    rows = ", ".join(f"({json.dumps(p.name)}, {query_value(p)}, {json.dumps(p.spread)})" for p in query)
     return (
         f"{{% set query = [{rows}] %}}{{% set q = namespace(pairs=[]) %}}"
-        "{% for name, value, many in query if value is defined %}"
-        "{% for item in (value if many and value is iterable and value is not string else [value]) %}"
-        "{% set q.pairs = q.pairs + [(name, item)] %}"
-        "{% endfor %}{% endfor %}{{ q.pairs | urlencode }}"
+        "{% for name, value, spread in query if value is defined %}"
+        '{% if spread == "each" and value is iterable and value is not string and value is not mapping %}'
+        "{% for item in value %}{% set q.pairs = q.pairs + [(name, item)] %}{% endfor %}"
+        '{% elif spread in ("props", "deep") and value is mapping %}'
+        "{% for key, item in value.items() %}"
+        '{% set q.pairs = q.pairs + [(name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}'
+        "{% endfor %}"
+        "{% else %}{% set q.pairs = q.pairs + [(name, value)] %}{% endif %}"
+        "{% endfor %}{{ q.pairs | urlencode }}"
     )

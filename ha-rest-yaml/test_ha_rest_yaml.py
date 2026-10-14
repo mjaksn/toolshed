@@ -7,9 +7,10 @@ from a script and comparing the whole snippet, plus a second command, the
 naming of variables and the type of a value whose schema allows several.
 Between them they cover a JSON response reached through $ref and allOf, a
 plain text response, parameters in the path, query, header and body, optional
-ones left out when not given, query arrays repeated or joined, the script
-beside a command with its field types, defaults and conversions, all three
-kinds of authentication, and the command line options.
+ones left out when not given, query arrays repeated or joined and objects
+spread by property, the script beside a command with its field types, defaults
+and conversions, all three kinds of authentication, and the command line
+options.
 """
 
 from __future__ import annotations
@@ -65,6 +66,7 @@ SPEC = {
                 "parameters": [
                     {"name": "dry", "in": "query", "required": True, "schema": {"type": "boolean"}},
                     {"name": "tags", "in": "query", "required": True, "schema": {"type": "array"}},
+                    {"name": "filter", "in": "query", "required": True, "style": "deepObject", "schema": {"type": "object"}},
                 ],
                 "requestBody": {
                     "required": True,
@@ -238,14 +240,15 @@ script:
 
     def test_command_script_with_boolean_fields(self):
         # Header auth, the POST endpoint called toggle, with no optionals. A
-        # script cannot be called toggle, booleans get the boolean selector, and
-        # the query array repeats its name for each value.
+        # script cannot be called toggle, booleans get the boolean selector, the
+        # query array repeats its name for each value, and the query object
+        # sends each property as filter[property].
         self.assertEqual(
             self.run_tool("3", "3", "4", ""),
             """\
 rest_command:
   toggle:
-    url: 'http://thermostat.local:8080/api/fan?{% set query = [("dry", dry, false), ("tags", tags, true)] %}{% set q = namespace(pairs=[]) %}{% for name, value, many in query if value is defined %}{% for item in (value if many and value is iterable and value is not string else [value]) %}{% set q.pairs = q.pairs + [(name, item)] %}{% endfor %}{% endfor %}{{ q.pairs | urlencode }}'
+    url: 'http://thermostat.local:8080/api/fan?{% set query = [("dry", dry, ""), ("tags", tags, "each"), ("filter", filter, "deep")] %}{% set q = namespace(pairs=[]) %}{% for name, value, spread in query if value is defined %}{% if spread == "each" and value is iterable and value is not string and value is not mapping %}{% for item in value %}{% set q.pairs = q.pairs + [(name, item)] %}{% endfor %}{% elif spread in ("props", "deep") and value is mapping %}{% for key, item in value.items() %}{% set q.pairs = q.pairs + [(name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}{% endfor %}{% else %}{% set q.pairs = q.pairs + [(name, value)] %}{% endif %}{% endfor %}{{ q.pairs | urlencode }}'
     method: post
     headers:
       Authorization: YOUR_HEADER_VALUE
@@ -268,6 +271,12 @@ script:
         required: true
         selector:
           text: {}
+      filter:
+        name: filter
+        description: 'Query parameter, object.'
+        required: true
+        selector:
+          text: {}
       speed:
         name: speed
         description: 'Body property, integer. Percent.'
@@ -284,7 +293,7 @@ script:
           boolean: {}
     sequence:
       - action: rest_command.toggle
-        data: '{{ dict({"dry": dry | bool | lower if dry is defined, "tags": tags | from_json if tags is string else tags, "speed": speed | int if speed is defined, "on": on | bool if on is defined}.items() | rejectattr(1, "undefined")) }}'
+        data: '{{ dict({"dry": dry | bool | lower if dry is defined, "tags": tags | from_json if tags is string else tags, "filter": filter | from_json if filter is string else filter, "speed": speed | int if speed is defined, "on": on | bool if on is defined}.items() | rejectattr(1, "undefined")) }}'
 """,
         )
 

@@ -75,26 +75,30 @@ when the parameter was left out.
 
 An optional parameter is left out of the request when the action is not given
 it. When the query parameters or body properties included are all required,
-and no query parameter is a repeated array, as below, each is written into the
-URL or the payload by itself, and a `/` in a path or query value is left as it
-is. Once any of them is optional, the query string or the payload is instead
-one template building a dict of only the variables the action was given.
-Written that way, a query string encodes a `/` as well, and is a bare `?` when
-none of its parameters is given. `rest_command` has no way to leave a header
-out, so an optional header that is not given is sent empty. The tool prints
-which variables the action needs and which it can also be given.
+and no query array or object is spread over several parameters, as below, each
+is written into the URL or the payload by itself, and a `/` in a path or query
+value is left as it is. Once any of them is optional, the query string or the
+payload is instead one template building a dict of only the variables the
+action was given. Written that way, a query string encodes a `/` as well, and
+is a bare `?` when none of its parameters is given. `rest_command` has no way
+to leave a header out, so an optional header that is not given is sent empty.
+The tool prints which variables the action needs and which it can also be
+given.
 
-A query parameter that is an array is sent as its `style` and `explode` say.
-By default each value is a parameter of its own, as `tags=a&tags=b`, which a
-dict cannot hold, so then the query string is one template gathering name and
-value pairs, which encodes a `/` and leaves out what was not given, as above.
-An empty list sends nothing, and a single value that is not a list is sent as
-it is. With `explode: false` the values are joined into one parameter, by a
-comma, or a space for `spaceDelimited` or a `|` for `pipeDelimited`, and the
-delimiter is percent-encoded with the rest, which a server decodes before
-splitting. An object in the query, and an array or object in a path or header,
-is sent as one value, as given. A boolean inside a query array is sent as
-Python writes it, `True` or `False`.
+A query parameter that is an array or an object is sent as its `style` and
+`explode` say. By default it is spread over parameters of its own: an array
+repeats its name for each value, as `tags=a&tags=b`, and an object names one
+after each property, as `role=admin`, or as `filter[role]=admin` for
+`deepObject`. A dict cannot hold a name twice, so then the query string is one
+template gathering name and value pairs, which encodes a `/` and leaves out
+what was not given, as above. An empty list or mapping sends nothing, and a
+value that is not the list or mapping expected is sent as one parameter, as it
+is. With `explode: false` the values are joined into one parameter, an
+object's names among them, as `filter=role,admin`, by a comma, or a space for
+`spaceDelimited` or a `|` for `pipeDelimited`. Brackets and delimiters are
+percent-encoded with the rest, which a server decodes before reading them. An
+array or object in a path or header is sent as one value, as given, and a
+boolean inside a query array or object as Python writes it, `True` or `False`.
 
 ## The script
 
@@ -114,26 +118,26 @@ mark the field in the editor; it still runs the script without it.
 
 A field whose schema gives a `default` carries it, as `true` or `false` for a
 boolean and as the text that would be typed for anything else, so an integer
-default of 0 becomes `'0'`. The editor fills every default in when the script is
-added as an action, optional fields included, so each is sent unless it is
-cleared, and an optional boolean defaulting to true has no checkbox to leave it
-out at all. Sending it changes nothing, since a default is what the API assumes
-when the value is missing. Home Assistant itself does not apply a default when
-the script runs without the field.
+default of 0 becomes `'0'`. The editor fills every default in when the script
+is added as an action, optional fields included, so each is sent unless it is
+cleared, and an optional boolean defaulting to true has no checkbox to leave
+it out at all. Sending it changes nothing, since a default is what the API
+assumes when the value is missing. Home Assistant itself does not apply a
+default when the script runs without the field.
 
 The script hands its fields to the command as one template rendering a dict.
 That leaves out the blank ones, and keeps text as text, where a template for
 each key would turn a typed `123` into a number. A value bound for JSON is
 converted to the type the schema gives it: `int` for an integer, `float` for a
 number, `bool` for a boolean, and `from_json` for an array or object typed as
-text. An array bound for the query is read with `from_json` too, so its values
-can be sent one by one. A boolean bound for the URL or a header becomes `true`
-or `false`, where Python would write `True`. A value that does not convert stops the script with
-an error rather than sending something else. A schema allowing more than one
-type, through a list of types or a `oneOf` or `anyOf` whose branches differ,
-even one nested inside an `allOf`, gives no one type to convert to, so its
-value gets a text field and is passed on as typed. A `null` alongside one other
-type does not count.
+text. An array or object bound for the query is read with `from_json` too, so
+the command can take it apart. A boolean bound for the URL or a header becomes
+`true` or `false`, where Python would write `True`. A value that does not
+convert stops the script with an error rather than sending something else. A
+schema allowing more than one type, through a list of types or a `oneOf` or
+`anyOf` whose branches differ, even one nested inside an `allOf`, gives no one
+type to convert to, so its value gets a text field and is passed on as typed.
+A `null` alongside one other type does not count.
 
 The default `configuration.yaml` already has `script: !include scripts.yaml`,
 and a second `script:` key will not load. Either move the entry under

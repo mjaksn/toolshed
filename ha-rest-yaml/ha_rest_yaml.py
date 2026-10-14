@@ -72,7 +72,7 @@ TEMPLATE_NAMES = {
     "utcnow", "version", "wrap", "zip",
 }
 
-# What joins the values of a query array sent as one parameter, by its style.
+# What joins the values of a query array or object sent as one parameter, by its style.
 DELIMITERS = {"form": ",", "spaceDelimited": " ", "pipeDelimited": "|"}
 
 
@@ -92,14 +92,25 @@ class Param:
     description: str = ""
     # The schema's default, or None when it gives none.
     default: object = None
-    # For a query array sent as one parameter, what joins its values. Empty
-    # when each value is a parameter of its own, as tags=a&tags=b.
+    # For a query array or object sent as one parameter, what joins its values,
+    # and an object's names with them. Empty when they go as parameters of their own.
     delimiter: str = ""
+    # For a query object: each property goes as name[property], not property alone.
+    deep: bool = False
 
     @property
-    def repeated(self) -> bool:
-        """A query array whose values each go into the url as a parameter of their own."""
-        return self.location == "query" and self.type == "array" and not self.delimiter
+    def spread(self) -> str:
+        """How a query array or object goes into the url as parameters of its own, or empty when it is one.
+
+        each repeats the name for every value, as tags=a&tags=b. props names a
+        parameter after each property, as role=admin, and deep after the
+        parameter and property both, as filter[role]=admin.
+        """
+        if self.location != "query" or self.delimiter or self.type not in ("array", "object"):
+            return ""
+        if self.type == "array":
+            return "each"
+        return "deep" if self.deep else "props"
 
     @property
     def placeholder(self) -> str:
@@ -182,11 +193,15 @@ class Spec:
                     type=self.value_type(raw.get("schema")), description=raw.get("description") or "",
                     default=self.merged(raw.get("schema")).get("default"),
                 )
-                # A query array is form style unless it says otherwise, and form
-                # style repeats the parameter for each value unless explode is false.
+                # A query array or object is form style unless it says otherwise,
+                # and only form style spreads it over parameters of its own unless
+                # explode is false. deepObject is only defined spread.
                 style = raw.get("style") or "form"
-                if location == "query" and param.type == "array" and not raw.get("explode", style == "form"):
-                    param.delimiter = DELIMITERS.get(style, ",")
+                if location == "query" and param.type in ("array", "object"):
+                    if style == "deepObject":
+                        param.deep = True
+                    elif not raw.get("explode", style == "form"):
+                        param.delimiter = DELIMITERS.get(style, ",")
         endpoint.params = list(params.values())
 
         body = self.resolve(operation.get("requestBody"))

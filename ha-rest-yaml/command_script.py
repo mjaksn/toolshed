@@ -17,8 +17,8 @@ its own would render as an empty string. And Home Assistant reads whatever a
 template renders as a Python literal when it can, so text typed as 123 would
 reach the command as a number; inside a rendered dict it keeps its quotes and
 stays text. Values are converted to the type the schema asks for instead, where
-the command puts them into JSON, and an array bound for the query is read as
-JSON too, so the command can send each of its values. A value is passed on as
+the command puts them into JSON, and an array or object bound for the query is
+read as JSON too, so the command can take it apart. A value is passed on as
 typed when the schema allows more than one type.
 """
 
@@ -91,8 +91,8 @@ def value(param, in_json):
     if param.type == "boolean":
         # Outside JSON a boolean is text, and Python would spell it True.
         return f"{v} | bool if {v} is defined" if in_json else f"{v} | bool | lower if {v} is defined"
-    if param.type == "array" and param.location == "query":
-        # Typed as JSON, as an array bound for JSON is, so each value reaches the url.
+    if param.type in ("array", "object") and param.location == "query":
+        # Typed as JSON, as one bound for JSON is, so the url can take it apart.
         return f"{v} | from_json if {v} is string else {v}"
     if not in_json:
         return v
