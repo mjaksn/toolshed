@@ -306,9 +306,9 @@ script:
     def test_variables_avoid_names_a_template_already_has(self):
         # Left out, a variable called dict or now would still be defined, as
         # the global, and so could not be omitted.
-        params = [ha_rest_yaml.Param(name, "body", False) for name in ("dict", "now", "this", "if", "speed")]
+        params = [ha_rest_yaml.Param(name, "body", False) for name in ("dict", "now", "this", "self", "if", "speed")]
         ha_rest_yaml.name_variables(params)
-        self.assertEqual([p.variable for p in params], ["dict_", "now_", "this_", "if_", "speed"])
+        self.assertEqual([p.variable for p in params], ["dict_", "now_", "this_", "self_", "if_", "speed"])
 
     def test_a_value_that_could_take_several_types_has_none(self):
         # With no one type, the script passes the value on as typed rather

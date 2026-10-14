@@ -49,12 +49,14 @@ UNSAFE_ATTRIBUTES = set(dir(dict)) | {"true", "false", "none", "True", "False", 
 # Names Jinja reads as a literal or an operator rather than a variable.
 JINJA_WORDS = {"true", "false", "none", "True", "False", "None", "and", "or", "not", "in", "is", "if", "else"}
 
-# Names a template already has without being given them: Jinja's globals, Home
-# Assistant's at the 2026.9.2 tag, and the this and context a script run adds.
-# A parameter called one of these would be defined even when left out, so it
-# could not be omitted, and one called dict would break the templates using it.
+# Names a template already has without being given them: Jinja's globals, the
+# self Jinja binds to the template itself, Home Assistant's globals at the
+# 2026.9.2 tag, and the this and context a script run adds. A parameter called
+# one of these would be defined even when left out, so it could not be omitted,
+# and one called dict would break the templates using it. self cannot even be
+# given a value.
 TEMPLATE_NAMES = {
-    "range", "dict", "lipsum", "cycler", "joiner", "namespace", "this", "context", "acos",
+    "self", "range", "dict", "lipsum", "cycler", "joiner", "namespace", "this", "context", "acos",
     "apply", "area_devices", "area_entities", "area_id", "area_name", "areas", "as_datetime",
     "as_function", "as_local", "as_timedelta", "as_timestamp", "asin", "atan", "atan2",
     "average", "bitwise_and", "bitwise_or", "bitwise_xor", "bool", "clamp", "closest",
