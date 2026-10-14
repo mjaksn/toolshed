@@ -3,12 +3,13 @@
     python -m unittest
 
 One small document and one run per kind of YAML, each answering the questions
-from a script and comparing the whole snippet, plus a second command and the
-naming of variables. Between them they cover a JSON response reached through
-$ref and allOf, a plain text response, parameters in the path, query, header
-and body, optional ones left out when not given, the script beside a command
-with its field types and conversions, all three kinds of authentication, and
-the command line options.
+from a script and comparing the whole snippet, plus a second command, the
+naming of variables and the type of a value whose schema allows several.
+Between them they cover a JSON response reached through $ref and allOf, a
+plain text response, parameters in the path, query, header and body, optional
+ones left out when not given, the script beside a command with its field types
+and conversions, all three kinds of authentication, and the command line
+options.
 """
 
 from __future__ import annotations
@@ -269,6 +270,22 @@ script:
         params = [ha_rest_yaml.Param(name, "body", False) for name in ("dict", "now", "this", "if", "speed")]
         ha_rest_yaml.name_variables(params)
         self.assertEqual([p.variable for p in params], ["dict_", "now_", "this_", "if_", "speed"])
+
+    def test_a_value_that_could_take_several_types_has_none(self):
+        # With no one type, the script passes the value on as typed rather
+        # than converting it to the first type the schema allows.
+        spec = ha_rest_yaml.Spec({"components": {"schemas": {"Count": {"anyOf": [{"type": "integer"}, {"type": "null"}]}}}})
+        cases = [
+            ({"type": ["integer", "string"]}, ""),
+            ({"oneOf": [{"type": "integer"}, {"type": "string"}]}, ""),
+            ({"anyOf": [{"type": "string"}, {}]}, ""),
+            ({"anyOf": [{"type": "number"}, {"type": "null"}]}, "number"),
+            ({"type": ["boolean", "null"]}, "boolean"),
+            ({"$ref": "#/components/schemas/Count"}, "integer"),
+            ({"items": {"type": "string"}}, "array"),
+        ]
+        for schema, expected in cases:
+            self.assertEqual(spec.value_type(schema), expected, schema)
 
     def test_base_url_falls_back_to_where_the_document_came_from(self):
         # A FastAPI document names no server, or only a path.

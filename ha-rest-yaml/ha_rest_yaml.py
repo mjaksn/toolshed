@@ -84,7 +84,7 @@ class Param:
     variable: str = ""
     # For a body property: the schema requires it whenever the body is sent.
     needed_with_body: bool = False
-    # The schema's type, such as string or boolean, or empty when it names none.
+    # The schema's type, such as string or boolean, or empty when it names none or allows several.
     type: str = ""
     description: str = ""
 
@@ -166,7 +166,7 @@ class Spec:
                 required = location == "path" or bool(raw.get("required"))
                 params[(raw["name"], location)] = Param(
                     raw["name"], location, required,
-                    type=schema_type(self.merged(raw.get("schema"))), description=raw.get("description") or "",
+                    type=self.value_type(raw.get("schema")), description=raw.get("description") or "",
                 )
         endpoint.params = list(params.values())
 
@@ -178,8 +178,10 @@ class Spec:
             endpoint.body_required = bool(body.get("required"))
             schema = self.merged(media.get("schema"))
             # readOnly properties belong to responses only, so a request leaves them out.
-            properties = {name: self.merged(child) for name, child in (schema.get("properties") or {}).items()}
-            properties = {name: child for name, child in properties.items() if not child.get("readOnly")}
+            properties = {
+                name: child for name, child in (schema.get("properties") or {}).items()
+                if not self.merged(child).get("readOnly")
+            }
             if endpoint.json_request and properties:
                 # A property the schema requires is only required outright when
                 # the body it belongs to has to be sent at all. Otherwise it is
@@ -188,14 +190,14 @@ class Spec:
                 endpoint.params += [
                     Param(
                         name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed,
-                        type=schema_type(child), description=child.get("description") or "",
+                        type=self.value_type(child), description=self.merged(child).get("description") or "",
                     )
                     for name, child in properties.items()
                 ]
             else:
                 endpoint.params.append(Param(
                     "payload", "raw body", endpoint.body_required,
-                    type=schema_type(schema), description=body.get("description") or "",
+                    type=self.value_type(media.get("schema")), description=body.get("description") or "",
                 ))
         name_variables(endpoint.params)
 
@@ -260,6 +262,21 @@ class Spec:
                     result.setdefault(key, value)
         # Left out when empty, so a merge of scalar schemas is not taken for an object.
         return {key: value for key, value in result.items() if value or key not in ("properties", "required")}
+
+    def value_type(self, schema) -> str:
+        """The one type a value of the schema takes, ignoring null, or empty when it could take several.
+
+        merged() keeps only the first branch of a oneOf or anyOf, which would
+        convert a value to that branch's type when another branch allows it.
+        """
+        resolved = self.resolve(schema)
+        kinds = set()
+        for branch in resolved.get("oneOf") or resolved.get("anyOf") or [schema]:
+            branch = self.merged(branch)
+            kind = branch.get("type")
+            kinds |= set(kind) if isinstance(kind, list) else {schema_type(branch)}
+        kinds.discard("null")
+        return kinds.pop() if len(kinds) == 1 else ""
 
     def walk_schema(self, schema, path, out, depth):
         if depth > 12:

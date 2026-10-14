@@ -107,7 +107,10 @@ converted to the type the schema gives it: `int` for an integer, `float` for a
 number, `bool` for a boolean, and `from_json` for an array or object typed as
 text. A boolean bound for the URL or a header becomes `true` or `false`, where
 Python would write `True`. A value that does not convert stops the script with
-an error rather than sending something else.
+an error rather than sending something else. A schema allowing more than one
+type, through a list of types or a `oneOf` or `anyOf` whose branches differ,
+gives no one type to convert to, so its value gets a text field and is passed
+on as typed. A `null` alongside one other type does not count.
 
 The default `configuration.yaml` already has `script: !include scripts.yaml`,
 and a second `script:` key will not load. Either move the entry under
@@ -150,9 +153,10 @@ integration, and `command_script.py` builds the script beside a command.
 python3 -m unittest
 ```
 
-6 tests, standard library only: one run of each kind against a small document,
+7 tests, standard library only: one run of each kind against a small document,
 comparing the whole snippet, a second command whose script has boolean fields,
-one for the variable names kept clear of template globals, and one for where
-the base URL comes from. Nothing is fetched. The tests compare the templates as
-written; they do not render them. `check.sh` runs exactly that and is what CI
-runs, on `ubuntu-latest`, per `ci.json`.
+one for the variable names kept clear of template globals, one for the type of
+a value whose schema allows several, and one for where the base URL comes from.
+Nothing is fetched. The tests compare the templates as written; they do not
+render them. `check.sh` runs exactly that and is what CI runs, on
+`ubuntu-latest`, per `ci.json`.
