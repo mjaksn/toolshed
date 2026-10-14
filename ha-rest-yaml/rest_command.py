@@ -47,10 +47,12 @@ def generate(endpoints, base_url, extra, console):
         r"\{([^}]*)\}", lambda m: "{{ " + path_variables[m.group(1)] + " | urlencode }}", endpoint.path
     )
     query = [p for p in params if p.location == "query"]
-    if query and all(p in needed for p in query):
-        url += "?" + "&".join(f"{p.name}={{{{ {p.variable} | urlencode }}}}" for p in query)
+    if any(p.repeated for p in query):
+        url += "?" + query_pairs(query)
+    elif query and all(p in needed for p in query):
+        url += "?" + "&".join(f"{p.name}={{{{ {query_value(p)} | urlencode }}}}" for p in query)
     elif query:
-        url += "?{{ " + given(query) + " | urlencode }}"
+        url += "?{{ " + given(query, query_value) + " | urlencode }}"
     config = {"url": url}
     if endpoint.method != "get":
         config["method"] = endpoint.method
@@ -94,7 +96,33 @@ def generate(endpoints, base_url, extra, console):
     return {"rest_command": {key: config}, "script": {script_key: script}}
 
 
-def given(params):
+def given(params, value=lambda p: p.variable):
     """A Jinja dict of each parameter's name and value, leaving out any the action was not given."""
-    pairs = ", ".join(f"{json.dumps(p.name)}: {p.variable}" for p in params)
+    pairs = ", ".join(f"{json.dumps(p.name)}: {value(p)}" for p in params)
     return f'dict({{{pairs}}}.items() | rejectattr(1, "undefined"))'
+
+
+def query_value(p):
+    """The Jinja expression for a query parameter's value, joining up an array sent as one parameter."""
+    v = p.variable
+    if not p.delimiter:
+        return v
+    return f"({v} | join({json.dumps(p.delimiter)}) if {v} is defined and {v} is iterable and {v} is not string else {v})"
+
+
+def query_pairs(query):
+    """Jinja writing the query string from name and value pairs, one pair for each value of a repeated array.
+
+    A dict cannot hold the same name twice, so the pairs are gathered in a
+    namespace instead. Every variable is read in the first statement, before
+    the template sets a name of its own, so a parameter called q or name is not
+    hidden by one. A single value given for a repeated array is sent as is.
+    """
+    rows = ", ".join(f"({json.dumps(p.name)}, {query_value(p)}, {'true' if p.repeated else 'false'})" for p in query)
+    return (
+        f"{{% set query = [{rows}] %}}{{% set q = namespace(pairs=[]) %}}"
+        "{% for name, value, many in query if value is defined %}"
+        "{% for item in (value if many and value is iterable and value is not string else [value]) %}"
+        "{% set q.pairs = q.pairs + [(name, item)] %}"
+        "{% endfor %}{% endfor %}{{ q.pairs | urlencode }}"
+    )

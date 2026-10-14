@@ -90,6 +90,9 @@ def value(param, in_json):
     if param.type == "boolean":
         # Outside JSON a boolean is text, and Python would spell it True.
         return f"{v} | bool if {v} is defined" if in_json else f"{v} | bool | lower if {v} is defined"
+    if param.type == "array" and param.location == "query":
+        # Typed as JSON, as an array bound for JSON is, so each value reaches the url.
+        return f"{v} | from_json if {v} is string else {v}"
     if not in_json:
         return v
     if param.type == "integer":

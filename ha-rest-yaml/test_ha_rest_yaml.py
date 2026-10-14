@@ -7,9 +7,9 @@ from a script and comparing the whole snippet, plus a second command, the
 naming of variables and the type of a value whose schema allows several.
 Between them they cover a JSON response reached through $ref and allOf, a
 plain text response, parameters in the path, query, header and body, optional
-ones left out when not given, the script beside a command with its field types,
-defaults and conversions, all three kinds of authentication, and the command line
-options.
+ones left out when not given, query arrays repeated or joined, the script
+beside a command with its field types, defaults and conversions, all three
+kinds of authentication, and the command line options.
 """
 
 from __future__ import annotations
@@ -40,7 +40,11 @@ SPEC = {
             "parameters": [{"name": "zone", "in": "path"}],
             "put": {
                 "operationId": "setTarget",
-                "parameters": [{"name": "hold-for", "in": "query"}, {"name": "X-Trace", "in": "header"}],
+                "parameters": [
+                    {"name": "hold-for", "in": "query"},
+                    {"name": "X-Trace", "in": "header"},
+                    {"name": "zones", "in": "query", "explode": False, "schema": {"type": "array"}},
+                ],
                 "requestBody": {
                     "required": True,
                     "content": {
@@ -58,7 +62,10 @@ SPEC = {
         "/fan": {
             "post": {
                 "operationId": "toggle",
-                "parameters": [{"name": "dry", "in": "query", "required": True, "schema": {"type": "boolean"}}],
+                "parameters": [
+                    {"name": "dry", "in": "query", "required": True, "schema": {"type": "boolean"}},
+                    {"name": "tags", "in": "query", "required": True, "schema": {"type": "array"}},
+                ],
                 "requestBody": {
                     "required": True,
                     "content": {
@@ -165,13 +172,14 @@ binary_sensor:
 
     def test_command_with_chosen_optional_parameters(self):
         # Digest auth, the PUT endpoint, with the query, header and body optionals,
-        # which the query string and payload leave out when they are not given.
+        # which the query string and payload leave out when they are not given,
+        # and a query array joined into one value.
         self.assertEqual(
-            self.run_tool("3", "2", "3", "1, 2, 3"),
+            self.run_tool("3", "2", "3", "1, 2, 3, 4"),
             """\
 rest_command:
   set_target:
-    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?{{ dict({"hold-for": hold_for}.items() | rejectattr(1, "undefined")) | urlencode }}'
+    url: 'http://thermostat.local:8080/api/zones/{{ zone | urlencode }}/target?{{ dict({"hold-for": hold_for, "zones": (zones | join(",") if zones is defined and zones is iterable and zones is not string else zones)}.items() | rejectattr(1, "undefined")) | urlencode }}'
     method: put
     authentication: digest
     username: YOUR_USERNAME
@@ -203,6 +211,12 @@ script:
         required: false
         selector:
           text: {}
+      zones:
+        name: zones
+        description: 'Query parameter, array.'
+        required: false
+        selector:
+          text: {}
       celsius:
         name: celsius
         description: 'Body property, number.'
@@ -218,19 +232,20 @@ script:
           text: {}
     sequence:
       - action: rest_command.set_target
-        data: '{{ dict({"zone": zone, "hold_for": hold_for, "X_Trace": X_Trace, "celsius": celsius | float if celsius is defined, "mode": mode}.items() | rejectattr(1, "undefined")) }}'
+        data: '{{ dict({"zone": zone, "hold_for": hold_for, "X_Trace": X_Trace, "zones": zones | from_json if zones is string else zones, "celsius": celsius | float if celsius is defined, "mode": mode}.items() | rejectattr(1, "undefined")) }}'
 """,
         )
 
     def test_command_script_with_boolean_fields(self):
         # Header auth, the POST endpoint called toggle, with no optionals. A
-        # script cannot be called toggle, and booleans get the boolean selector.
+        # script cannot be called toggle, booleans get the boolean selector, and
+        # the query array repeats its name for each value.
         self.assertEqual(
             self.run_tool("3", "3", "4", ""),
             """\
 rest_command:
   toggle:
-    url: 'http://thermostat.local:8080/api/fan?dry={{ dry | urlencode }}'
+    url: 'http://thermostat.local:8080/api/fan?{% set query = [("dry", dry, false), ("tags", tags, true)] %}{% set q = namespace(pairs=[]) %}{% for name, value, many in query if value is defined %}{% for item in (value if many and value is iterable and value is not string else [value]) %}{% set q.pairs = q.pairs + [(name, item)] %}{% endfor %}{% endfor %}{{ q.pairs | urlencode }}'
     method: post
     headers:
       Authorization: YOUR_HEADER_VALUE
@@ -247,6 +262,12 @@ script:
         required: true
         selector:
           boolean: {}
+      tags:
+        name: tags
+        description: 'Query parameter, array.'
+        required: true
+        selector:
+          text: {}
       speed:
         name: speed
         description: 'Body property, integer. Percent.'
@@ -263,7 +284,7 @@ script:
           boolean: {}
     sequence:
       - action: rest_command.toggle
-        data: '{{ dict({"dry": dry | bool | lower if dry is defined, "speed": speed | int if speed is defined, "on": on | bool if on is defined}.items() | rejectattr(1, "undefined")) }}'
+        data: '{{ dict({"dry": dry | bool | lower if dry is defined, "tags": tags | from_json if tags is string else tags, "speed": speed | int if speed is defined, "on": on | bool if on is defined}.items() | rejectattr(1, "undefined")) }}'
 """,
         )
 

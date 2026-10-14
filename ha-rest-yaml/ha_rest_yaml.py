@@ -72,6 +72,9 @@ TEMPLATE_NAMES = {
     "utcnow", "version", "wrap", "zip",
 }
 
+# What joins the values of a query array sent as one parameter, by its style.
+DELIMITERS = {"form": ",", "spaceDelimited": " ", "pipeDelimited": "|"}
+
 
 @dataclass
 class Param:
@@ -89,6 +92,14 @@ class Param:
     description: str = ""
     # The schema's default, or None when it gives none.
     default: object = None
+    # For a query array sent as one parameter, what joins its values. Empty
+    # when each value is a parameter of its own, as tags=a&tags=b.
+    delimiter: str = ""
+
+    @property
+    def repeated(self) -> bool:
+        """A query array whose values each go into the url as a parameter of their own."""
+        return self.location == "query" and self.type == "array" and not self.delimiter
 
     @property
     def placeholder(self) -> str:
@@ -166,11 +177,16 @@ class Spec:
             location = raw.get("in")
             if raw.get("name") and location in ("path", "query", "header"):
                 required = location == "path" or bool(raw.get("required"))
-                params[(raw["name"], location)] = Param(
+                param = params[(raw["name"], location)] = Param(
                     raw["name"], location, required,
                     type=self.value_type(raw.get("schema")), description=raw.get("description") or "",
                     default=self.merged(raw.get("schema")).get("default"),
                 )
+                # A query array is form style unless it says otherwise, and form
+                # style repeats the parameter for each value unless explode is false.
+                style = raw.get("style") or "form"
+                if location == "query" and param.type == "array" and not raw.get("explode", style == "form"):
+                    param.delimiter = DELIMITERS.get(style, ",")
         endpoint.params = list(params.values())
 
         body = self.resolve(operation.get("requestBody"))

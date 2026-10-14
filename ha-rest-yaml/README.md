@@ -84,6 +84,17 @@ to leave a header out, so an optional header that is not given is sent empty.
 The tool prints which variables the action needs and which it can also be
 given.
 
+A query parameter that is an array is sent as its `style` and `explode` say.
+By default each value is a parameter of its own, as `tags=a&tags=b`, which a
+dict cannot hold, so then the query string is one template gathering name and
+value pairs, which encodes a `/` and leaves out what was not given, as above.
+An empty list sends nothing, and a single value that is not a list is sent as
+it is. With `explode: false` the values are joined into one parameter, by a
+comma, or a space for `spaceDelimited` or a `|` for `pipeDelimited`, and the
+delimiter is percent-encoded with the rest, which a server decodes before
+splitting. An object in the query, and an array or object in a path or header,
+is sent as one value, as given.
+
 ## The script
 
 Running the command from an automation means typing its data by hand in the
@@ -114,8 +125,9 @@ That leaves out the blank ones, and keeps text as text, where a template for
 each key would turn a typed `123` into a number. A value bound for JSON is
 converted to the type the schema gives it: `int` for an integer, `float` for a
 number, `bool` for a boolean, and `from_json` for an array or object typed as
-text. A boolean bound for the URL or a header becomes `true` or `false`, where
-Python would write `True`. A value that does not convert stops the script with
+text. An array bound for the query is read with `from_json` too, so its values
+can be sent one by one. A boolean bound for the URL or a header becomes `true`
+or `false`, where Python would write `True`. A value that does not convert stops the script with
 an error rather than sending something else. A schema allowing more than one
 type, through a list of types or a `oneOf` or `anyOf` whose branches differ,
 even one nested inside an `allOf`, gives no one type to convert to, so its
