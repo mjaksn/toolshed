@@ -9,7 +9,9 @@ prints one of:
 - a [RESTful binary sensor](https://www.home-assistant.io/integrations/binary_sensor.rest),
   the same under `binary_sensor:`, on or off from one value;
 - a [RESTful command](https://www.home-assistant.io/integrations/rest_command),
-  an entry under `rest_command:` that calls the endpoint as an action.
+  an entry under `rest_command:` that calls the endpoint as an action, and
+  beside it a [script](https://www.home-assistant.io/integrations/script/)
+  under `script:` that runs the command with a field for each parameter.
 
 These are the per-platform integrations, not the combined
 [RESTful integration](https://www.home-assistant.io/integrations/rest/) under a
@@ -62,12 +64,87 @@ variable, filled from the data the action is called with, so a path parameter
 `zone` turns the URL into `.../zones/{{ zone | urlencode }}/...`. Query
 parameters go into the URL too, because `rest_command` has no `params` key.
 Values in the URL pass through `urlencode`, so an `&` or `#` in one stays part
-of the value, though a `/` is left as it is. The properties of a JSON request
-body count as parameters as well, and go into a JSON `payload`; once any of
-them is chosen, the ones the body's schema requires come along too. Two parameters
-whose names would make the same variable, such as a query and a header both
-called `id`, get the location added to tell them apart. The tool prints the
-name of each variable the action will want.
+of the value. The properties of a JSON request body count as parameters as
+well, and go into a JSON `payload`; once any of them is chosen, the ones the
+body's schema requires come along too. Two parameters whose names would make
+the same variable, such as a query and a header both called `id`, get the
+location added to tell them apart. A parameter named like something every
+template already has, such as `dict`, `min` or `now`, gets an underscore added,
+as in `min_`, because a template would find the original name defined even
+when the parameter was left out.
+
+An optional parameter is left out of the request when the action is not given
+it. When the query parameters or body properties included are all required,
+and no query parameter is an array or object, as below, each is written into
+the URL or the payload by itself, and a `/` in a path or query value is left
+as it is. Once any of them is optional, the query string or the payload is
+instead one template building a dict of only the variables the action was
+given. Written that way, a query string encodes a `/` as well, and is a bare
+`?` when none of its parameters is given. `rest_command` has no way to leave a
+header out, so an optional header that is not given is sent empty. The tool
+prints which variables the action needs and which it can also be given.
+
+A query parameter that is an array or an object is sent as its `style` and
+`explode` say. By default it is spread over parameters of its own: an array
+repeats its name for each value, as `tags=a&tags=b`, and an object names one
+after each property, as `role=admin`, or as `filter[role]=admin` for
+`deepObject`. With `explode: false` its values are joined into one parameter
+instead, an object's names among them, as `filter=role,admin`, by a comma, or
+a space for `spaceDelimited` or a `|` for `pipeDelimited`. Either way the
+query string is then one template gathering name and value pairs a value at a
+time, since a dict cannot hold a name twice. Written that way it encodes a
+`/`, leaves out what was not given, as above, and writes a boolean as `true`
+or `false`, where Python would write `True`. An empty list or mapping sends
+nothing when spread and an empty value when joined, and a value that is not
+the list or mapping expected is sent as one parameter, as it is. Brackets and
+delimiters are percent-encoded with the rest, which a server decodes before
+reading them. An array or object in a path or header is sent as one value, as
+given.
+
+## The script
+
+Running the command from an automation means typing its data by hand in the
+automation editor. Running the script instead puts a field in the editor for
+each parameter, ready to fill in. The script is keyed like the command, with
+`_command` added when that would be `turn_on`, `turn_off` or `toggle`, which
+Home Assistant keeps for its own script actions.
+
+Each parameter the command includes becomes a field, keyed by its variable,
+named after the parameter, and described by where it goes, its type, and any
+description the document gives it. A boolean gets a boolean selector and
+anything else a text one. A field is required when the command must be given
+it, which matches the document: required parameters, and the body properties
+the schema requires once the body is sent. Home Assistant uses that only to
+mark the field in the editor; it still runs the script without it.
+
+A field whose schema gives a `default` carries it, as `true` or `false` for a
+boolean and as the text that would be typed for anything else, so an integer
+default of 0 becomes `'0'`. The editor fills every default in when the script
+is added as an action, optional fields included, so each is sent unless it is
+cleared, and an optional boolean defaulting to true has no checkbox to leave
+it out at all. Sending it changes nothing, since a default is what the API
+assumes when the value is missing. Home Assistant itself does not apply a
+default when the script runs without the field.
+
+The script hands its fields to the command as one template rendering a dict.
+That leaves out the blank ones, and keeps text as text, where a template for
+each key would turn a typed `123` into a number. A value bound for JSON is
+converted to the type the schema gives it: `int` for an integer, `float` for a
+number, `bool` for a boolean, and `from_json` for an array or object typed as
+text. An array or object bound for the query is read with `from_json` too, so
+the command can take it apart. A boolean bound for the URL or a header becomes
+`true` or `false`, where Python would write `True`. A value that does not
+convert stops the script with an error rather than sending something else. A
+schema allowing more than one type, through a list of types or a `oneOf` or
+`anyOf` whose branches differ, even one nested inside an `allOf`, gives no one
+type to convert to, so its value gets a text field and is passed on as typed.
+A `null` alongside one other type does not count.
+
+The default `configuration.yaml` already has `script: !include scripts.yaml`,
+and a second `script:` key will not load. Either move the entry under
+`script:` into `scripts.yaml`, without the `script:` line itself, or rename
+the key to something like `script rest:`, which Home Assistant reads as more
+scripts.
 
 ## What it trusts
 
@@ -79,9 +156,14 @@ first branch of `oneOf` or `anyOf`, and array `items`; when it yields nothing,
 the response's example is walked instead. Templates are not checked.
 
 The keys written were checked against the Home Assistant source at the
-2026.9.2 tag, in `homeassistant/components/rest` and
-`homeassistant/components/rest_command`, rather than against the documentation
-pages.
+2026.9.2 tag, in `homeassistant/components/rest`,
+`homeassistant/components/rest_command` and `homeassistant/components/script`,
+rather than against the documentation pages. How the templates render, and
+what a script's data becomes, was checked against
+`homeassistant/helpers/template` and `homeassistant/helpers/service.py` at the
+same tag, and what the editor does with a field's default against
+`src/components/ha-service-control.ts` in frontend 20260826.7, the release
+that tag pins.
 
 ## What it needs
 
@@ -93,7 +175,7 @@ document is given as a URL.
 `ha_rest_yaml.py` is the one to run. It reads the document, asks the questions
 common to all three, and writes the YAML. `rest_sensor.py`,
 `rest_binary_sensor.py` and `rest_command.py` each build the config for one
-integration.
+integration, and `command_script.py` builds the script beside a command.
 
 ## Tests
 
@@ -101,7 +183,10 @@ integration.
 python3 -m unittest
 ```
 
-4 tests, standard library only: one run of each kind against a small document,
-comparing the whole snippet, and one for where the base URL comes from. Nothing
-is fetched. `check.sh` runs exactly that and is what CI runs,
-on `ubuntu-latest`, per `ci.json`.
+7 tests, standard library only: one run of each kind against a small document,
+comparing the whole snippet, a second command whose script has boolean fields,
+one for the variable names kept clear of template globals, one for the type of
+a value whose schema allows several, and one for where the base URL comes from.
+Nothing is fetched. The tests compare the templates as written; they do not
+render them. `check.sh` runs exactly that and is what CI runs, on
+`ubuntu-latest`, per `ci.json`.

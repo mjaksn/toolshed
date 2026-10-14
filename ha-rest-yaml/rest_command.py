@@ -7,12 +7,18 @@ with the data the action is called with, which is how parameters get in. There
 is no params key, so query parameters are written into the url. The method is
 one of get, patch, post, put or delete, and username and password must be
 given together or not at all.
+
+A variable the action is not given is undefined in those templates. It renders
+as an empty string, or fails tojson outright, so an optional parameter is only
+optional once the template leaves it out when it is missing.
 """
 
 from __future__ import annotations
 
 import json
 import re
+
+import command_script
 
 METHODS = ("get", "patch", "post", "put", "delete")
 
@@ -31,6 +37,8 @@ def generate(endpoints, base_url, extra, console):
         picked = [optional[i] for i in console.choose_many("Which optional parameters should it include?", labels)]
     body_sent = any(p.location == "body" and (p.required or p in picked) for p in endpoint.params)
     params = [p for p in endpoint.params if p.required or p in picked or (body_sent and p.needed_with_body)]
+    # The ones every call must supply. The rest are left out when the action is not given them.
+    needed = [p for p in params if p.required or (body_sent and p.needed_with_body)]
 
     path_variables = {p.name: p.variable for p in endpoint.params if p.location == "path"}
     # Values reaching the url are encoded, so an & or # in one cannot add a query
@@ -38,9 +46,13 @@ def generate(endpoints, base_url, extra, console):
     url = base_url + re.sub(
         r"\{([^}]*)\}", lambda m: "{{ " + path_variables[m.group(1)] + " | urlencode }}", endpoint.path
     )
-    query = [f"{p.name}={{{{ {p.variable} | urlencode }}}}" for p in params if p.location == "query"]
-    if query:
-        url += "?" + "&".join(query)
+    query = [p for p in params if p.location == "query"]
+    if any(p.spread or p.delimiter for p in query):
+        url += "?" + query_pairs(query)
+    elif query and all(p in needed for p in query):
+        url += "?" + "&".join(f"{p.name}={{{{ {p.variable} | urlencode }}}}" for p in query)
+    elif query:
+        url += "?{{ " + given(query) + " | urlencode }}"
     config = {"url": url}
     if endpoint.method != "get":
         config["method"] = endpoint.method
@@ -55,13 +67,17 @@ def generate(endpoints, base_url, extra, console):
         config["headers"] = headers
 
     body = [p for p in params if p.location == "body"]
-    if body:
+    if body and all(p in needed for p in body):
         fields = ", ".join(f"{json.dumps(p.name)}: {{{{ {p.variable} | tojson }}}}" for p in body)
         config["payload"] = "{" + fields + "}"
+    elif body:
+        config["payload"] = "{{ " + given(body) + " | tojson }}"
     elif raw := [p for p in params if p.location == "raw body"]:
         # A JSON body is serialised, or a list or mapping would render as Python.
         encode = " | tojson" if endpoint.json_request else ""
         config["payload"] = f"{{{{ {raw[0].variable}{encode} }}}}"
+        if raw[0] not in needed:
+            config["payload"] = f"{{% if {raw[0].variable} is defined %}}{config['payload']}{{% endif %}}"
     elif endpoint.body_required and endpoint.json_request:
         # A body that must be sent, with none of its properties chosen.
         config["payload"] = "{}"
@@ -71,7 +87,48 @@ def generate(endpoints, base_url, extra, console):
     # Home Assistant registers its own rest_command.reload after the configured
     # commands, which would replace a command of that name.
     key = "reload_command" if endpoint.slug == "reload" else endpoint.slug
-    variables = sorted(p.variable for p in params)
-    if variables:
-        console.say(f"Call rest_command.{key} with data for: {', '.join(variables)}")
-    return {"rest_command": {key: config}}
+    script_key, script = command_script.entry(endpoint, key, params, needed)
+    if needed:
+        console.say(f"Call rest_command.{key} with data for: {', '.join(sorted(p.variable for p in needed))}")
+    if optional := sorted(p.variable for p in params if p not in needed):
+        console.say(f"It can also be given data for: {', '.join(optional)}")
+    console.say(f"Or run script.{script_key}" + (", which asks for each as a field." if params else "."))
+    return {"rest_command": {key: config}, "script": {script_key: script}}
+
+
+def given(params):
+    """A Jinja dict of each parameter's name and value, leaving out any the action was not given."""
+    pairs = ", ".join(f"{json.dumps(p.name)}: {p.variable}" for p in params)
+    return f'dict({{{pairs}}}.items() | rejectattr(1, "undefined"))'
+
+
+def query_pairs(query):
+    """Jinja writing the query string from name and value pairs, for when an array or object is among them.
+
+    A dict cannot hold a name twice, so the pairs are gathered in a namespace
+    instead, a spread array or object adding one for each value or property,
+    and a joined one adding one for the lot. Going one value at a time is also
+    what lets a boolean be written true or false, where Python would write
+    True. Every variable is read in the first statement, before the template
+    sets a name of its own, so a parameter called q or name is not hidden by
+    one. A value that is not the list or mapping expected is sent as it is.
+    """
+    rows = ", ".join(
+        f"({json.dumps(p.name)}, {p.variable}, {json.dumps(p.spread)}, {json.dumps(p.delimiter)})" for p in query
+    )
+    return (
+        f"{{% set query = [{rows}] %}}{{% set q = namespace(pairs=[], parts=[]) %}}"
+        "{% for name, value, spread, sep in query if value is defined %}"
+        '{% if value is mapping and (sep or spread in ("props", "deep")) %}'
+        "{% set q.parts = [] %}{% for key, item in value.items() %}"
+        "{% set item = item | lower if item is boolean else item %}"
+        '{% set q.parts = q.parts + [(name, key ~ sep ~ item) if sep else (name ~ "[" ~ key ~ "]" if spread == "deep" else key, item)] %}'
+        "{% endfor %}"
+        "{% elif value is iterable and value is not string and value is not mapping and (sep or spread) %}"
+        "{% set q.parts = [] %}{% for item in value %}"
+        "{% set q.parts = q.parts + [(name, item | lower if item is boolean else item)] %}"
+        "{% endfor %}"
+        "{% else %}{% set q.parts = [(name, value | lower if value is boolean else value)] %}{% endif %}"
+        "{% set q.pairs = q.pairs + ([(name, q.parts | map(attribute=1) | join(sep))] if sep else q.parts) %}"
+        "{% endfor %}{{ q.pairs | urlencode }}"
+    )

@@ -29,7 +29,8 @@ a repository of its own goes in here.
   outdated now.
 - [ha-rest-yaml](ha-rest-yaml/), a Python script that asks a few numbered
   questions about an OpenAPI 3 document and writes the Home Assistant YAML for
-  a RESTful sensor, binary sensor or command on one of its endpoints. Standard
+  a RESTful sensor, binary sensor or command on one of its endpoints, with a
+  script beside a command that offers each parameter as a field. Standard
   library only.
 - [install-modules](install-modules/), a PowerShell script that links every
   module in the shed into PowerShell's module path, for PowerShell 7 or

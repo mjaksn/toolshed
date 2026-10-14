@@ -6,8 +6,9 @@
 
 Asks what to generate (a RESTful sensor, a RESTful binary sensor or a RESTful
 command), which authentication to leave placeholders for, and then which
-endpoint and value or parameters to use. Questions go to stderr and the YAML
-goes to stdout, so the snippet can be redirected into a file.
+endpoint and value or parameters to use. A command comes with a script that
+runs it, offering each parameter as a field. Questions go to stderr and the
+YAML goes to stdout, so the snippet can be redirected into a file.
 
 The document is trusted rather than validated. Only paths, parameters, request
 bodies, response bodies and the first server are read, and whatever is missing
@@ -34,7 +35,7 @@ import rest_sensor
 KINDS = [
     ("RESTful sensor", rest_sensor),
     ("RESTful binary sensor", rest_binary_sensor),
-    ("RESTful command", rest_command),
+    ("RESTful command, and a script to run it", rest_command),
 ]
 
 AUTH_KINDS = ["Basic", "Digest", "HTTP header"]
@@ -48,6 +49,34 @@ UNSAFE_ATTRIBUTES = set(dir(dict)) | {"true", "false", "none", "True", "False", 
 # Names Jinja reads as a literal or an operator rather than a variable.
 JINJA_WORDS = {"true", "false", "none", "True", "False", "None", "and", "or", "not", "in", "is", "if", "else"}
 
+# Names a template already has without being given them: Jinja's globals, the
+# self Jinja binds to the template itself, Home Assistant's globals at the
+# 2026.9.2 tag, and the this and context a script run adds. A parameter called
+# one of these would be defined even when left out, so it could not be omitted,
+# and one called dict would break the templates using it. self cannot even be
+# given a value.
+TEMPLATE_NAMES = {
+    "self", "range", "dict", "lipsum", "cycler", "joiner", "namespace", "this", "context", "acos",
+    "apply", "area_devices", "area_entities", "area_id", "area_name", "areas", "as_datetime",
+    "as_function", "as_local", "as_timedelta", "as_timestamp", "asin", "atan", "atan2",
+    "average", "bitwise_and", "bitwise_or", "bitwise_xor", "bool", "clamp", "closest",
+    "combine", "config_entry_attr", "config_entry_id", "cos", "device_attr", "device_entities",
+    "device_id", "device_name", "difference", "distance", "e", "entity_name", "expand",
+    "flatten", "float", "floor_areas", "floor_entities", "floor_id", "floor_name", "floors",
+    "has_value", "iif", "int", "integration_entities", "intersect", "is_device_attr",
+    "is_hidden_entity", "is_number", "is_state", "is_state_attr", "issue", "issues",
+    "label_areas", "label_description", "label_devices", "label_entities", "label_id",
+    "label_name", "labels", "log", "max", "md5", "median", "merge_response", "min", "now",
+    "pack", "pi", "relative_time", "remap", "set", "sha1", "sha256", "sha512", "shuffle", "sin",
+    "slugify", "sqrt", "state_attr", "state_attr_translated", "state_translated", "states",
+    "statistical_mode", "strptime", "symmetric_difference", "tan", "tau", "time_since",
+    "time_until", "timedelta", "today_at", "tuple", "typeof", "union", "unpack", "urlencode",
+    "utcnow", "version", "wrap", "zip",
+}
+
+# What joins the values of a query array or object sent as one parameter, by its style.
+DELIMITERS = {"form": ",", "spaceDelimited": " ", "pipeDelimited": "|"}
+
 
 @dataclass
 class Param:
@@ -60,6 +89,30 @@ class Param:
     variable: str = ""
     # For a body property: the schema requires it whenever the body is sent.
     needed_with_body: bool = False
+    # The schema's type, such as string or boolean, or empty when it names none or allows several.
+    type: str = ""
+    description: str = ""
+    # The schema's default, or None when it gives none.
+    default: object = None
+    # For a query array or object sent as one parameter, what joins its values,
+    # and an object's names with them. Empty when they go as parameters of their own.
+    delimiter: str = ""
+    # For a query object: each property goes as name[property], not property alone.
+    deep: bool = False
+
+    @property
+    def spread(self) -> str:
+        """How a query array or object goes into the url as parameters of its own, or empty when it is one.
+
+        each repeats the name for every value, as tags=a&tags=b. props names a
+        parameter after each property, as role=admin, and deep after the
+        parameter and property both, as filter[role]=admin.
+        """
+        if self.location != "query" or self.delimiter or self.type not in ("array", "object"):
+            return ""
+        if self.type == "array":
+            return "each"
+        return "deep" if self.deep else "props"
 
     @property
     def placeholder(self) -> str:
@@ -137,7 +190,20 @@ class Spec:
             location = raw.get("in")
             if raw.get("name") and location in ("path", "query", "header"):
                 required = location == "path" or bool(raw.get("required"))
-                params[(raw["name"], location)] = Param(raw["name"], location, required)
+                param = params[(raw["name"], location)] = Param(
+                    raw["name"], location, required,
+                    type=self.value_type(raw.get("schema")), description=raw.get("description") or "",
+                    default=self.merged(raw.get("schema")).get("default"),
+                )
+                # A query array or object is form style unless it says otherwise,
+                # and only form style spreads it over parameters of its own unless
+                # explode is false. deepObject is only defined spread.
+                style = raw.get("style") or "form"
+                if location == "query" and param.type in ("array", "object"):
+                    if style == "deepObject":
+                        param.deep = True
+                    elif not raw.get("explode", style == "form"):
+                        param.delimiter = DELIMITERS.get(style, ",")
         endpoint.params = list(params.values())
 
         body = self.resolve(operation.get("requestBody"))
@@ -148,21 +214,29 @@ class Spec:
             endpoint.body_required = bool(body.get("required"))
             schema = self.merged(media.get("schema"))
             # readOnly properties belong to responses only, so a request leaves them out.
-            properties = [
-                name for name, child in (schema.get("properties") or {}).items()
+            properties = {
+                name: child for name, child in (schema.get("properties") or {}).items()
                 if not self.merged(child).get("readOnly")
-            ]
+            }
             if endpoint.json_request and properties:
                 # A property the schema requires is only required outright when
                 # the body it belongs to has to be sent at all. Otherwise it is
                 # needed as soon as any part of the body is.
                 needed = set(schema.get("required") or [])
                 endpoint.params += [
-                    Param(name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed)
-                    for name in properties
+                    Param(
+                        name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed,
+                        type=self.value_type(child), description=self.merged(child).get("description") or "",
+                        default=self.merged(child).get("default"),
+                    )
+                    for name, child in properties.items()
                 ]
             else:
-                endpoint.params.append(Param("payload", "raw body", endpoint.body_required))
+                endpoint.params.append(Param(
+                    "payload", "raw body", endpoint.body_required,
+                    type=self.value_type(media.get("schema")), description=body.get("description") or "",
+                    default=self.merged(media.get("schema")).get("default"),
+                ))
         name_variables(endpoint.params)
 
         response = self.resolve(self.success_response(operation.get("responses")))
@@ -227,6 +301,46 @@ class Spec:
         # Left out when empty, so a merge of scalar schemas is not taken for an object.
         return {key: value for key, value in result.items() if value or key not in ("properties", "required")}
 
+    def value_type(self, schema) -> str:
+        """The one type a value of the schema takes, ignoring null, or empty when it could take several.
+
+        merged() keeps only the first branch of a oneOf or anyOf, which would
+        convert a value to that branch's type when another branch allows it.
+        """
+        kinds = self.value_types(schema)
+        if kinds is None:
+            return ""
+        kinds.discard("null")
+        return kinds.pop() if len(kinds) == 1 else ""
+
+    def value_types(self, schema, depth=0):
+        """Every type a value of the schema may take, or None when it may take any.
+
+        A type list and every branch of a oneOf or anyOf add types, however
+        deeply they sit, and allOf keeps only the types all its parts allow.
+        """
+        if isinstance(schema, dict) and "$ref" in schema and len(schema) > 1:
+            siblings = {key: value for key, value in schema.items() if key != "$ref"}
+            schema = {**siblings, "allOf": [{"$ref": schema["$ref"]}, *siblings.get("allOf", [])]}
+        schema = self.resolve(schema)
+        if depth > 12:
+            return None
+        kind = schema.get("type")
+        if isinstance(kind, list):
+            kinds = {k for k in kind if isinstance(k, str)}
+        elif isinstance(kind, str):
+            kinds = {kind}
+        else:
+            implied = schema_type(schema)
+            kinds = {implied} if implied else None
+        for key in ("oneOf", "anyOf"):
+            if schema.get(key):
+                branches = [self.value_types(branch, depth + 1) for branch in schema[key]]
+                kinds = both(kinds, None if None in branches else set().union(*branches))
+        for part in schema.get("allOf") or []:
+            kinds = both(kinds, self.value_types(part, depth + 1))
+        return kinds
+
     def walk_schema(self, schema, path, out, depth):
         if depth > 12:
             return
@@ -267,17 +381,39 @@ def walk_example(value, path, out, depth):
         out.append((path, kinds.get(type(value), "value")))
 
 
+def schema_type(schema: dict) -> str:
+    """The type a merged schema declares, ignoring null, or the one its keywords imply."""
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), None)
+    if not kind:
+        kind = "array" if "items" in schema else "object" if "properties" in schema else ""
+    return kind if isinstance(kind, str) else ""
+
+
+def both(a: set | None, b: set | None) -> set | None:
+    """The types two schemas both allow, where None allows any and an integer is a number."""
+    if a is None or b is None:
+        return b if a is None else a
+    common = a & b
+    if ("number" in a and "integer" in b) or ("integer" in a and "number" in b):
+        common.add("integer")
+    return common
+
+
 def name_variables(params: list[Param]) -> None:
     """Give each parameter a Jinja variable no other parameter of the endpoint shares.
 
     A query and a header parameter can both be called id, and foo-bar and foo_bar
     read the same once made identifiers, so a clash takes the location as a
-    suffix, and a number after that if it still clashes.
+    suffix, and a number after that if it still clashes. A name Jinja reads as
+    a keyword, or one a template already has, such as dict or now, takes an
+    underscore first.
     """
     taken = set()
     for param in params:
         base = re.sub(r"\W", "_", param.name)
-        if base in JINJA_WORDS:
+        if base in JINJA_WORDS or base in TEMPLATE_NAMES:
             base += "_"
         elif not base.isidentifier():
             base = "_" + base
@@ -419,7 +555,8 @@ def load(source: str, verify: bool = True) -> Spec:
 def main(argv: list[str] | None = None, console: Console | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate a Home Assistant RESTful sensor, binary sensor or"
-        " command YAML snippet from an OpenAPI 3 JSON document."
+        " command YAML snippet from an OpenAPI 3 JSON document. A command comes"
+        " with a script that runs it."
     )
     parser.add_argument(
         "spec", help="the OpenAPI document, as JSON: a file, or an http or https URL to fetch it from"
