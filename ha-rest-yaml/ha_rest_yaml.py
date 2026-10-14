@@ -49,6 +49,29 @@ UNSAFE_ATTRIBUTES = set(dir(dict)) | {"true", "false", "none", "True", "False", 
 # Names Jinja reads as a literal or an operator rather than a variable.
 JINJA_WORDS = {"true", "false", "none", "True", "False", "None", "and", "or", "not", "in", "is", "if", "else"}
 
+# Names a template already has without being given them: Jinja's globals, Home
+# Assistant's at the 2026.9.2 tag, and the this and context a script run adds.
+# A parameter called one of these would be defined even when left out, so it
+# could not be omitted, and one called dict would break the templates using it.
+TEMPLATE_NAMES = {
+    "range", "dict", "lipsum", "cycler", "joiner", "namespace", "this", "context", "acos",
+    "apply", "area_devices", "area_entities", "area_id", "area_name", "areas", "as_datetime",
+    "as_function", "as_local", "as_timedelta", "as_timestamp", "asin", "atan", "atan2",
+    "average", "bitwise_and", "bitwise_or", "bitwise_xor", "bool", "clamp", "closest",
+    "combine", "config_entry_attr", "config_entry_id", "cos", "device_attr", "device_entities",
+    "device_id", "device_name", "difference", "distance", "e", "entity_name", "expand",
+    "flatten", "float", "floor_areas", "floor_entities", "floor_id", "floor_name", "floors",
+    "has_value", "iif", "int", "integration_entities", "intersect", "is_device_attr",
+    "is_hidden_entity", "is_number", "is_state", "is_state_attr", "issue", "issues",
+    "label_areas", "label_description", "label_devices", "label_entities", "label_id",
+    "label_name", "labels", "log", "max", "md5", "median", "merge_response", "min", "now",
+    "pack", "pi", "relative_time", "remap", "set", "sha1", "sha256", "sha512", "shuffle", "sin",
+    "slugify", "sqrt", "state_attr", "state_attr_translated", "state_translated", "states",
+    "statistical_mode", "strptime", "symmetric_difference", "tan", "tau", "time_since",
+    "time_until", "timedelta", "today_at", "tuple", "typeof", "union", "unpack", "urlencode",
+    "utcnow", "version", "wrap", "zip",
+}
+
 
 @dataclass
 class Param:
@@ -293,12 +316,14 @@ def name_variables(params: list[Param]) -> None:
 
     A query and a header parameter can both be called id, and foo-bar and foo_bar
     read the same once made identifiers, so a clash takes the location as a
-    suffix, and a number after that if it still clashes.
+    suffix, and a number after that if it still clashes. A name Jinja reads as
+    a keyword, or one a template already has, such as dict or now, takes an
+    underscore first.
     """
     taken = set()
     for param in params:
         base = re.sub(r"\W", "_", param.name)
-        if base in JINJA_WORDS:
+        if base in JINJA_WORDS or base in TEMPLATE_NAMES:
             base += "_"
         elif not base.isidentifier():
             base = "_" + base

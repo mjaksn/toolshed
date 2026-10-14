@@ -68,7 +68,10 @@ of the value. The properties of a JSON request body count as parameters as
 well, and go into a JSON `payload`; once any of them is chosen, the ones the
 body's schema requires come along too. Two parameters whose names would make
 the same variable, such as a query and a header both called `id`, get the
-location added to tell them apart.
+location added to tell them apart. A parameter named like something every
+template already has, such as `dict`, `min` or `now`, gets an underscore added,
+as in `min_`, because a template would find the original name defined even
+when the parameter was left out.
 
 An optional parameter is left out of the request when the action is not given
 it. When the query parameters or body properties included are all required,
@@ -147,8 +150,9 @@ integration, and `command_script.py` builds the script beside a command.
 python3 -m unittest
 ```
 
-5 tests, standard library only: one run of each kind against a small document,
+6 tests, standard library only: one run of each kind against a small document,
 comparing the whole snippet, a second command whose script has boolean fields,
-and one for where the base URL comes from. Nothing is fetched. The tests compare
-the templates as written; they do not render them. `check.sh` runs exactly that
-and is what CI runs, on `ubuntu-latest`, per `ci.json`.
+one for the variable names kept clear of template globals, and one for where
+the base URL comes from. Nothing is fetched. The tests compare the templates as
+written; they do not render them. `check.sh` runs exactly that and is what CI
+runs, on `ubuntu-latest`, per `ci.json`.

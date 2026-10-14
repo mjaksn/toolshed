@@ -3,11 +3,12 @@
     python -m unittest
 
 One small document and one run per kind of YAML, each answering the questions
-from a script and comparing the whole snippet, plus a second command. Between
-them they cover a JSON response reached through $ref and allOf, a plain text
-response, parameters in the path, query, header and body, optional ones left
-out when not given, the script beside a command with its field types and
-conversions, all three kinds of authentication, and the command line options.
+from a script and comparing the whole snippet, plus a second command and the
+naming of variables. Between them they cover a JSON response reached through
+$ref and allOf, a plain text response, parameters in the path, query, header
+and body, optional ones left out when not given, the script beside a command
+with its field types and conversions, all three kinds of authentication, and
+the command line options.
 """
 
 from __future__ import annotations
@@ -261,6 +262,13 @@ script:
         data: '{{ dict({"dry": dry | bool | lower if dry is defined, "speed": speed | int if speed is defined, "on": on | bool if on is defined}.items() | rejectattr(1, "undefined")) }}'
 """,
         )
+
+    def test_variables_avoid_names_a_template_already_has(self):
+        # Left out, a variable called dict or now would still be defined, as
+        # the global, and so could not be omitted.
+        params = [ha_rest_yaml.Param(name, "body", False) for name in ("dict", "now", "this", "if", "speed")]
+        ha_rest_yaml.name_variables(params)
+        self.assertEqual([p.variable for p in params], ["dict_", "now_", "this_", "if_", "speed"])
 
     def test_base_url_falls_back_to_where_the_document_came_from(self):
         # A FastAPI document names no server, or only a path.
