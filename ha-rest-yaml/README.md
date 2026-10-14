@@ -100,6 +100,15 @@ it, which matches the document: required parameters, and the body properties
 the schema requires once the body is sent. Home Assistant uses that only to
 mark the field in the editor; it still runs the script without it.
 
+A field whose schema gives a `default` carries it, as `true` or `false` for a
+boolean and as the text that would be typed for anything else, so an integer
+default of 0 becomes `'0'`. The editor fills every default in when the script is
+added as an action, optional fields included, so each is sent unless it is
+cleared, and an optional boolean defaulting to true has no checkbox to leave it
+out at all. Sending it changes nothing, since a default is what the API assumes
+when the value is missing. Home Assistant itself does not apply a default when
+the script runs without the field.
+
 The script hands its fields to the command as one template rendering a dict.
 That leaves out the blank ones, and keeps text as text, where a template for
 each key would turn a typed `123` into a number. A value bound for JSON is
@@ -134,7 +143,9 @@ The keys written were checked against the Home Assistant source at the
 rather than against the documentation pages. How the templates render, and
 what a script's data becomes, was checked against
 `homeassistant/helpers/template` and `homeassistant/helpers/service.py` at the
-same tag.
+same tag, and what the editor does with a field's default against
+`src/components/ha-service-control.ts` in frontend 20260826.7, the release
+that tag pins.
 
 ## What it needs
 

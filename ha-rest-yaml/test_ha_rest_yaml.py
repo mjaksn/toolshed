@@ -7,8 +7,8 @@ from a script and comparing the whole snippet, plus a second command, the
 naming of variables and the type of a value whose schema allows several.
 Between them they cover a JSON response reached through $ref and allOf, a
 plain text response, parameters in the path, query, header and body, optional
-ones left out when not given, the script beside a command with its field types
-and conversions, all three kinds of authentication, and the command line
+ones left out when not given, the script beside a command with its field types,
+defaults and conversions, all three kinds of authentication, and the command line
 options.
 """
 
@@ -48,7 +48,7 @@ SPEC = {
                             "schema": {
                                 "type": "object",
                                 "required": ["celsius"],
-                                "properties": {"celsius": {"type": "number"}, "mode": {"type": "string"}},
+                                "properties": {"celsius": {"type": "number"}, "mode": {"type": "string", "default": "auto"}},
                             }
                         }
                     }
@@ -67,8 +67,8 @@ SPEC = {
                                 "type": "object",
                                 "required": ["speed", "on"],
                                 "properties": {
-                                    "speed": {"type": "integer", "description": "Percent."},
-                                    "on": {"type": "boolean"},
+                                    "speed": {"type": "integer", "description": "Percent.", "default": 50},
+                                    "on": {"type": "boolean", "default": True},
                                     "label": {"type": "string"},
                                 },
                             }
@@ -213,6 +213,7 @@ script:
         name: mode
         description: 'Body property, string.'
         required: false
+        default: auto
         selector:
           text: {}
     sequence:
@@ -250,12 +251,14 @@ script:
         name: speed
         description: 'Body property, integer. Percent.'
         required: true
+        default: '50'
         selector:
           text: {}
       'on':
         name: 'on'
         description: 'Body property, boolean.'
         required: true
+        default: true
         selector:
           boolean: {}
     sequence:

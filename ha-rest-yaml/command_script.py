@@ -2,11 +2,14 @@
 
 Checked against homeassistant/components/script/config.py,
 homeassistant/helpers/service.py and homeassistant/helpers/template at the
-2026.9.2 tag. A script's fields are what the automation editor offers to fill
+2026.9.2 tag, and the editor's src/components/ha-service-control.ts in
+frontend 20260826.7, the release that tag pins. A script's fields are what the automation editor offers to fill
 in when the script is run as an action, and each arrives in the script as a
 variable of the same name, undefined when it was left blank. A field may carry
-a name, a description, required and a selector; required only marks it in the
-editor. A script may not be called reload, turn_on, turn_off or toggle.
+a name, a description, required, a default and a selector. Required only marks
+it in the editor, and the default is filled in there when the script is added
+as an action; Home Assistant applies neither when the script runs. A script may
+not be called reload, turn_on, turn_off or toggle.
 
 The action's data is one template rendering a dict, rather than a template per
 key, for two reasons. A blank field can be left out of a dict, where a key of
@@ -19,6 +22,8 @@ more than one.
 """
 
 from __future__ import annotations
+
+import json
 
 # Script object ids Home Assistant keeps for its own actions on scripts.
 RESERVED = ("reload", "turn_on", "turn_off", "toggle")
@@ -44,8 +49,11 @@ def entry(endpoint, command, params, needed):
             "name": p.name,
             "description": description,
             "required": p in needed,
-            "selector": {"boolean" if p.type == "boolean" else "text": {}},
         }
+        default = field_default(p)
+        if default is not None:
+            fields[p.variable]["default"] = default
+        fields[p.variable]["selector"] = {"boolean" if p.type == "boolean" else "text": {}}
     action = {"action": f"rest_command.{command}"}
     if params:
         json_values = endpoint.json_request
@@ -61,6 +69,15 @@ def entry(endpoint, command, params, needed):
         config["fields"] = fields
     config["sequence"] = [action]
     return key, config
+
+
+def field_default(param):
+    """The schema's default as the field holds it: true or false for a boolean, else text as typed."""
+    if param.type == "boolean":
+        return param.default if isinstance(param.default, bool) else None
+    if param.default is None or isinstance(param.default, str):
+        return param.default
+    return json.dumps(param.default)
 
 
 def value(param, in_json):

@@ -87,6 +87,8 @@ class Param:
     # The schema's type, such as string or boolean, or empty when it names none or allows several.
     type: str = ""
     description: str = ""
+    # The schema's default, or None when it gives none.
+    default: object = None
 
     @property
     def placeholder(self) -> str:
@@ -167,6 +169,7 @@ class Spec:
                 params[(raw["name"], location)] = Param(
                     raw["name"], location, required,
                     type=self.value_type(raw.get("schema")), description=raw.get("description") or "",
+                    default=self.merged(raw.get("schema")).get("default"),
                 )
         endpoint.params = list(params.values())
 
@@ -191,6 +194,7 @@ class Spec:
                     Param(
                         name, "body", endpoint.body_required and name in needed, needed_with_body=name in needed,
                         type=self.value_type(child), description=self.merged(child).get("description") or "",
+                        default=self.merged(child).get("default"),
                     )
                     for name, child in properties.items()
                 ]
@@ -198,6 +202,7 @@ class Spec:
                 endpoint.params.append(Param(
                     "payload", "raw body", endpoint.body_required,
                     type=self.value_type(media.get("schema")), description=body.get("description") or "",
+                    default=self.merged(media.get("schema")).get("default"),
                 ))
         name_variables(endpoint.params)
 
