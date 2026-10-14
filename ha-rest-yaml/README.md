@@ -75,14 +75,14 @@ when the parameter was left out.
 
 An optional parameter is left out of the request when the action is not given
 it. When the query parameters or body properties included are all required,
-each is written into the URL or the payload by itself, and a `/` in a path or
-query value is left as it is. Once any of them is optional, the query string or
-the payload is instead one template building a dict of only the variables the
-action was given. Written that way, a query string encodes a `/` as well, and
-is a bare `?` when none of its parameters is given. `rest_command` has no way
-to leave a header out, so an optional header that is not given is sent empty.
-The tool prints which variables the action needs and which it can also be
-given.
+and no query parameter is a repeated array, as below, each is written into the
+URL or the payload by itself, and a `/` in a path or query value is left as it
+is. Once any of them is optional, the query string or the payload is instead
+one template building a dict of only the variables the action was given.
+Written that way, a query string encodes a `/` as well, and is a bare `?` when
+none of its parameters is given. `rest_command` has no way to leave a header
+out, so an optional header that is not given is sent empty. The tool prints
+which variables the action needs and which it can also be given.
 
 A query parameter that is an array is sent as its `style` and `explode` say.
 By default each value is a parameter of its own, as `tags=a&tags=b`, which a
@@ -93,7 +93,8 @@ it is. With `explode: false` the values are joined into one parameter, by a
 comma, or a space for `spaceDelimited` or a `|` for `pipeDelimited`, and the
 delimiter is percent-encoded with the rest, which a server decodes before
 splitting. An object in the query, and an array or object in a path or header,
-is sent as one value, as given.
+is sent as one value, as given. A boolean inside a query array is sent as
+Python writes it, `True` or `False`.
 
 ## The script
 

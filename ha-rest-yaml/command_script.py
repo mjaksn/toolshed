@@ -17,8 +17,9 @@ its own would render as an empty string. And Home Assistant reads whatever a
 template renders as a Python literal when it can, so text typed as 123 would
 reach the command as a number; inside a rendered dict it keeps its quotes and
 stays text. Values are converted to the type the schema asks for instead, where
-the command puts them into JSON, and passed on as typed when the schema allows
-more than one.
+the command puts them into JSON, and an array bound for the query is read as
+JSON too, so the command can send each of its values. A value is passed on as
+typed when the schema allows more than one type.
 """
 
 from __future__ import annotations
