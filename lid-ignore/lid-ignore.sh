@@ -294,6 +294,11 @@ user_ini_set() {
   fi
 }
 
+# xfce_pm_running UID   whether xfce4-power-manager is running for the user.
+# The name is longer than the 15 characters a process name holds, so a plain
+# pgrep never matches it; the full command line is matched instead.
+xfce_pm_running() { pgrep -u "$1" -f '(^|/)xfce4-power-manager( |$)' >/dev/null 2>&1; }
+
 xfconf_set() {
   local name=$1 prop=$2 type=$3 value=$4 cur
   cur=$(as_user "$name" xfconf-query -c xfce4-power-manager -p "$prop" 2>/dev/null)
@@ -342,12 +347,12 @@ configure_user_desktops() {
   fi
 
   # --- XFCE ---
-  if command -v xfconf-query >/dev/null 2>&1 && { [[ -d $cfg/xfce4 ]] || pgrep -u "$U_UID" -x xfce4-power-manager >/dev/null; }; then
+  if command -v xfconf-query >/dev/null 2>&1 && { [[ -d $cfg/xfce4 ]] || xfce_pm_running "$U_UID"; }; then
     handled=1
     xfconf_set "$name" /xfce4-power-manager/lid-action-on-ac int 0
     xfconf_set "$name" /xfce4-power-manager/lid-action-on-battery int 0
     xfconf_set "$name" /xfce4-power-manager/logind-handle-lid-switch bool false
-    if [[ $DRY_RUN -eq 0 ]] && pgrep -u "$U_UID" -x xfce4-power-manager >/dev/null && user_has DISPLAY; then
+    if [[ $DRY_RUN -eq 0 ]] && xfce_pm_running "$U_UID" && user_has DISPLAY; then
       as_user "$name" xfce4-power-manager --restart >/dev/null 2>&1 && ok "$name: xfce4-power-manager restarted" \
         || info "$name: xfce4-power-manager picks the change up on next login"
     fi

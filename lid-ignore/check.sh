@@ -324,6 +324,22 @@ pkill -u "$user" 2>/dev/null
 while kill -0 "$sleeper" 2>/dev/null; do sleep 0.1; done
 expect "says nothing for a uid with no processes" test -z "$(in_script user_env 59999)"
 
+echo "xfce_pm_running"
+# Processes with the names, as the user; exec -a puts the name on the command
+# line, which is where the match has to happen, since the process name field
+# holds only its first 15 characters.
+runuser -u "$user" -- bash -c 'exec -a xfce4-power-manager-settings sleep 60' 2>/dev/null &
+disown
+sleep 0.5
+expect "does not take the settings dialog for the manager" eval '! in_script xfce_pm_running "$uid"'
+runuser -u "$user" -- bash -c 'exec -a xfce4-power-manager sleep 60' 2>/dev/null &
+manager=$!
+disown
+sleep 0.5
+expect "finds the manager by its full name" in_script xfce_pm_running "$uid"
+pkill -u "$user" 2>/dev/null
+while kill -0 "$manager" 2>/dev/null; do sleep 0.1; done
+
 echo "Options"
 expect "--help prints the usage and exits 0" \
     bash -c 'bash "$1" --help | grep -q "^Usage: sudo ./lid-ignore.sh"' _ "$script"
