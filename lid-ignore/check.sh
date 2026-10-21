@@ -51,7 +51,15 @@ mkdir -m 1777 "$state"
 made_dropin_dir=0
 [[ -d $dropin_dir ]] || made_dropin_dir=1
 for f in "${etc_files[@]}"; do
-    [[ -f $f ]] && cp -p "$f" "$backup/${f//\//_}"
+    [[ -f $f ]] || continue
+    # The cleanup takes a missing copy to mean the file was not there and
+    # removes it, so a copy that failed must stop everything here, before
+    # anything is changed.
+    if ! cp -p "$f" "$backup/${f//\//_}"; then
+        echo "check.sh: could not copy $f aside, so it could not be put back; nothing was changed" >&2
+        rm -rf -- "$tmp"
+        exit 1
+    fi
 done
 # A copy nobody can read wherever the checkout is, for the test that runs the
 # script without root.
