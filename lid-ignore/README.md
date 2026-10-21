@@ -33,7 +33,7 @@ setting already right is reported as such and left alone. It exits non-zero
 only when a change failed to apply, in which case each failure is marked
 `[FAIL]` in the output.
 
-Every line it prints carries a tag: `[info]` for what it found, `[ ok ]` for a
+Each report line carries a tag: `[info]` for what it found, `[ ok ]` for a
 setting already right, `[ set ]` for one it changed, `[would]` for one it would
 change under `--dry-run`, `[warn]` for something to look at by hand, and
 `[FAIL]` for a change that did not apply.
@@ -50,7 +50,7 @@ At the system level, always:
   the change takes effect at once, unless systemd is older than 240, where a
   restart can drop sessions; then it says to reboot instead.
 - **UPower**, if installed: `IgnoreLid=true` in `/etc/UPower/UPower.conf`,
-  followed by a restart of the service.
+  followed by a restart of the service when it is running.
 - **acpid and acpi-support**, if installed: `LID_SLEEP=false` in
   `/etc/default/acpi-support`. Any custom lid handler under `/etc/acpi` is
   reported for review rather than touched, since it may act on the lid in
@@ -65,10 +65,10 @@ override logind with it:
   `gsettings`, where the installed version still has them; a modern GNOME has
   none and defers to logind, which is then reported.
 - **Cinnamon** and **MATE**: their equivalent `gsettings` keys.
-- **KDE Plasma**, 5 and 6: `LidAction=0` in each power profile, in
-  `powerdevilrc` for Plasma 6 and `powermanagementprofilesrc` for Plasma 5,
-  whichever is present, and a reload of powerdevil when the user has a
-  session.
+- **KDE Plasma**, 5 and 6: the lid action set to 0 in each power profile,
+  as `LidAction` in `powerdevilrc` for Plasma 6 and as `lidAction` in
+  `powermanagementprofilesrc` for Plasma 5, whichever is present, and a
+  reload of powerdevil when the user has a session.
 - **LXQt**: `lidWatcherEnabled=false` in `lxqt-powermanagement.conf`.
 - **Anything else**: every remaining `gsettings` key with `lid` in its name is
   listed for manual review.
@@ -86,10 +86,11 @@ air.
 
 ## What it needs
 
-bash and root, on Linux with systemd-logind or elogind. Nothing to install:
-UPower, acpid and the desktop tools are each used when found and skipped when
-not. Nothing is changed outside `/etc` and the named users' configuration
-directories, and it writes no file it cannot describe in its output.
+bash and root, on Linux. It expects systemd-logind or elogind, and without
+either it warns and settles for what UPower and acpid can do. Nothing to
+install: UPower, acpid and the desktop tools are each used when found and
+skipped when not. Nothing is changed outside `/etc` and the named users'
+configuration directories, and every file it writes is named in its output.
 
 ## Tests
 
