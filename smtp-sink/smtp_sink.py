@@ -1218,7 +1218,7 @@ async def handle_client(reader, writer, args):
                 await send("502 Not supported")
             else:
                 await send("500 Unrecognized command")
-    except (asyncio.TimeoutError, ConnectionError, asyncio.IncompleteReadError):
+    except (TimeoutError, ConnectionError, asyncio.IncompleteReadError):
         pass
     except Exception as exc:  # keep one bad client from killing the server
         print(f"[{peer[0]}] error: {exc}", file=sys.stderr)
