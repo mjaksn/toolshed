@@ -66,21 +66,39 @@ done
 cp lid-ignore.sh "$tmp"
 chmod 644 "$tmp/lid-ignore.sh"
 
+# restart SERVICE: reports a restart that fails, since the cleanup must not
+# claim a setting is back when the service that holds it never reread it.
+restart() {
+    systemctl restart "$1" && return 0
+    echo "check.sh: could not restart $1 after putting its configuration back" >&2
+    return 1
+}
+
 cleanup() {
     local status=$? f saved left="" was now
-    was=$(cat "$backup/${dropin//\//_}" 2>/dev/null)
-    now=$(cat "$dropin" 2>/dev/null)
     for f in "${etc_files[@]}"; do
         saved=$backup/${f//\//_}
+        was=$(cat "$saved" 2>/dev/null)
+        now=$(cat "$f" 2>/dev/null)
         if [[ -f $saved ]]; then
             cp -p "$saved" "$f"
         else
             rm -f "$f"
         fi
+        [[ $was == "$now" ]] && continue
+        # The effective setting goes back to what it was, not just the file,
+        # so the service that read it is restarted as the script restarted it,
+        # where it is running.
+        case $f in
+            "$dropin") restart systemd-logind || status=1 ;;
+            /etc/UPower/UPower.conf)
+                ! systemctl is-active --quiet upower || restart upower || status=1 ;;
+            /etc/default/acpi-support)
+                ! systemctl is-active --quiet acpid || systemctl reload acpid 2>/dev/null \
+                    || restart acpid || status=1 ;;
+        esac
     done
     [[ $made_dropin_dir -eq 1 ]] && rmdir "$dropin_dir" 2>/dev/null
-    # The effective lid handling goes back to what it was, not just the file.
-    [[ $was != "$now" ]] && systemctl restart systemd-logind
     pkill -u "$user" 2>/dev/null
     id "$user" >/dev/null 2>&1 && userdel -r "$user" 2>/dev/null
     # Judged by what is left rather than by each step. A run that leaves the
