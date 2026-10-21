@@ -396,7 +396,10 @@ configure_user_desktops() {
       [[ $do5 -eq 1 ]] && user_ini_set "$name" "$cfg/powermanagementprofilesrc" "$p][HandleButtonEvents" lidAction 0
     done
     if [[ $DRY_RUN -eq 0 ]] && user_has DBUS_SESSION_BUS_ADDRESS && command -v dbus-send >/dev/null 2>&1; then
-      as_user "$name" dbus-send --session --dest=org.kde.Solid.PowerManagement \
+      # A method call, and one that waits for the reply: dbus-send sends a
+      # signal by default, which powerdevil ignores and which cannot fail.
+      as_user "$name" dbus-send --session --type=method_call --print-reply \
+        --dest=org.kde.Solid.PowerManagement \
         /org/kde/Solid/PowerManagement org.kde.Solid.PowerManagement.refreshStatus >/dev/null 2>&1 \
         && ok "$name: powerdevil reloaded" || info "$name: powerdevil picks the change up on next login"
     fi
