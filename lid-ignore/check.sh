@@ -16,6 +16,10 @@ if [[ ! -d /run/systemd/system ]]; then
     echo "check.sh: this machine is not running systemd" >&2
     exit 1
 fi
+if ! command -v dbus-run-session >/dev/null 2>&1; then
+    echo "check.sh: dbus-run-session is not installed, and the throwaway user's desktop tools run on it" >&2
+    exit 1
+fi
 if [[ $EUID -ne 0 ]]; then
     exec sudo bash "$0" "$@"
 fi
@@ -178,7 +182,8 @@ chown -R "$user:" "$cfg"
 
 # Stand-ins for the desktop tools, found first on PATH when the script runs.
 # Each keeps what it is told under $state, and notes who ran it, which should
-# be the user and never root.
+# be the user and never root, and on which bus, which should be a private one
+# since the user has no session.
 power=org.gnome.settings-daemon.plugins.power
 cat >"$stub/xfconf-query" <<EOF
 #!/usr/bin/env bash
@@ -197,6 +202,7 @@ file=\$state/xfconf\${prop//\//.}
 if [[ \$set -eq 1 ]]; then
     printf '%s\n' "\$value" >"\$file"
     id -un >"\$state/ran-as"
+    printf '%s\n' "\${DBUS_SESSION_BUS_ADDRESS:-none}" >"\$state/bus"
 else
     cat "\$file" 2>/dev/null || exit 1
 fi
@@ -213,7 +219,11 @@ case \$1 in
     list-schemas) printf '%s\n' "\$power" org.example.lid ;;
     list-keys) [[ \$2 == "\$power" ]] && printf '%s\n' lid-close-ac-action lid-close-battery-action ;;
     get) current "\$2" "\$3" ;;
-    set) printf '%s\n' "\$4" >"\$state/gsettings.\$2.\$3"; id -un >"\$state/ran-as" ;;
+    set)
+        printf '%s\n' "\$4" >"\$state/gsettings.\$2.\$3"
+        id -un >"\$state/ran-as"
+        printf '%s\n' "\${DBUS_SESSION_BUS_ADDRESS:-none}" >"\$state/bus"
+        ;;
     list-recursively)
         printf '%s %s %s\n' \\
             "\$power" lid-close-ac-action "\$(current "\$power" lid-close-ac-action)" \\
@@ -406,7 +416,9 @@ if [[ -f $backup/_etc_default_acpi-support ]]; then
 else
     echo "skip  acpi-support, which is not installed here"
 fi
-expect "the user has no session bus, so settings are written offline" says "no session bus for $user; writing settings offline" "$out"
+expect "the user has no session bus, so each tool gets a private one" \
+    says "no session bus for $user; running each desktop tool on a private bus" "$out"
+expect "and the tools did run on one" grep -q '^unix:' "$state/bus"
 expect "the KDE profiles all get LidAction=0, the one that was there edited in place" holds "$cfg/powerdevilrc" \
     '[AC][SuspendAndShutdown]\nLidAction=0\nPowerButtonAction=16\n\n[Battery][SuspendAndShutdown]\nLidAction=0\n\n[LowBattery][SuspendAndShutdown]\nLidAction=0\n'
 expect "the LXQt setting is written" holds "$cfg/lxqt/lxqt-powermanagement.conf" '[General]\nlidWatcherEnabled=false\n'

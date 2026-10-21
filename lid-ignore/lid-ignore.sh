@@ -266,14 +266,16 @@ user_env() {
   return 0
 }
 
-# as_user NAME CMD...   run as the user with their session environment.
+# as_user NAME CMD...   run as the user with their session environment, or on
+# a private bus when they have none: U_BUS is set by configure_user_desktops.
 as_user() {
   local name=$1; shift
-  local -a envargs=(HOME="$U_HOME" USER="$name" LOGNAME="$name" PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$U_UID")
+  local -a envargs=(HOME="$U_HOME" USER="$name" LOGNAME="$name" PATH="$PATH")
+  [[ -d /run/user/$U_UID ]] && envargs+=(XDG_RUNTIME_DIR="/run/user/$U_UID")
   if command -v runuser >/dev/null 2>&1; then
-    runuser -u "$name" -- env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} "$@"
+    runuser -u "$name" -- env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} ${U_BUS[@]+"${U_BUS[@]}"} "$@"
   elif command -v sudo >/dev/null 2>&1; then
-    sudo -u "$name" env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} "$@"
+    sudo -u "$name" env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} ${U_BUS[@]+"${U_BUS[@]}"} "$@"
   else
     fail "need runuser or sudo to run commands as $name"
     return 1
@@ -354,18 +356,27 @@ configure_user_desktops() {
   U_UID=$(id -u "$name" 2>/dev/null) || { warn "user $name not found; skipping"; return; }
   U_HOME=$(getent passwd "$name" | cut -d: -f6)
   mapfile -t U_ENV < <(user_env "$U_UID")
+  U_BUS=()
+  U_NO_BUS=0
   local cfg="$U_HOME/.config"
   local handled=0
 
   section "desktop settings for $name (uid $U_UID)"
   if user_has DBUS_SESSION_BUS_ADDRESS; then
     info "using live session bus for $name"
+  elif command -v dbus-run-session >/dev/null 2>&1; then
+    # xfconf and gsettings need a bus to keep anything, and without one they
+    # still report success. A private bus for each command makes the change
+    # land in the user's files, for their next login.
+    U_BUS=(dbus-run-session --)
+    info "no session bus for $name; running each desktop tool on a private bus, so settings apply on next login"
   else
-    info "no session bus for $name; writing settings offline (apply on next login)"
+    U_NO_BUS=1
+    warn "no session bus for $name and no dbus-run-session; xfconf and gsettings settings are skipped, file-based ones are written"
   fi
 
   # --- XFCE ---
-  if command -v xfconf-query >/dev/null 2>&1 && { [[ -d $cfg/xfce4 ]] || xfce_pm_running "$U_UID"; }; then
+  if [[ $U_NO_BUS -eq 0 ]] && command -v xfconf-query >/dev/null 2>&1 && { [[ -d $cfg/xfce4 ]] || xfce_pm_running "$U_UID"; }; then
     handled=1
     xfconf_set "$name" /xfce4-power-manager/lid-action-on-ac int 0
     xfconf_set "$name" /xfce4-power-manager/lid-action-on-battery int 0
@@ -377,7 +388,7 @@ configure_user_desktops() {
   fi
 
   # --- GNOME family (GNOME, Budgie, Pantheon) ---
-  if command -v gsettings >/dev/null 2>&1 && gsettings_schema_exists "$name" org.gnome.settings-daemon.plugins.power; then
+  if [[ $U_NO_BUS -eq 0 ]] && command -v gsettings >/dev/null 2>&1 && gsettings_schema_exists "$name" org.gnome.settings-daemon.plugins.power; then
     handled=1
     if ! gsettings_set "$name" org.gnome.settings-daemon.plugins.power lid-close-ac-action "'nothing'"; then
       info "$name: modern GNOME has no lid keys and defers to logind (configured above)"
@@ -387,14 +398,14 @@ configure_user_desktops() {
   fi
 
   # --- Cinnamon ---
-  if command -v gsettings >/dev/null 2>&1 && gsettings_schema_exists "$name" org.cinnamon.settings-daemon.plugins.power; then
+  if [[ $U_NO_BUS -eq 0 ]] && command -v gsettings >/dev/null 2>&1 && gsettings_schema_exists "$name" org.cinnamon.settings-daemon.plugins.power; then
     handled=1
     gsettings_set "$name" org.cinnamon.settings-daemon.plugins.power lid-close-ac-action "'nothing'" || true
     gsettings_set "$name" org.cinnamon.settings-daemon.plugins.power lid-close-battery-action "'nothing'" || true
   fi
 
   # --- MATE ---
-  if command -v gsettings >/dev/null 2>&1 && gsettings_schema_exists "$name" org.mate.power-manager; then
+  if [[ $U_NO_BUS -eq 0 ]] && command -v gsettings >/dev/null 2>&1 && gsettings_schema_exists "$name" org.mate.power-manager; then
     handled=1
     gsettings_set "$name" org.mate.power-manager button-lid-ac "'nothing'" || true
     gsettings_set "$name" org.mate.power-manager button-lid-battery "'nothing'" || true
@@ -430,7 +441,7 @@ configure_user_desktops() {
   fi
 
   # --- catch-all: any other gsettings keys mentioning "lid" ---
-  if command -v gsettings >/dev/null 2>&1; then
+  if [[ $U_NO_BUS -eq 0 ]] && command -v gsettings >/dev/null 2>&1; then
     local extra
     extra=$(as_user "$name" gsettings list-recursively 2>/dev/null \
       | grep -i 'lid' \
@@ -442,7 +453,7 @@ configure_user_desktops() {
     fi
   fi
 
-  [[ $handled -eq 0 ]] && info "$name: no supported desktop environment detected; logind handles the lid"
+  [[ $handled -eq 0 && $U_NO_BUS -eq 0 ]] && info "$name: no supported desktop environment detected; logind handles the lid"
 }
 
 # ------------------------------------------------------------------ main ----

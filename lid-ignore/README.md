@@ -76,7 +76,11 @@ override logind with it:
 Commands run on a user's behalf run as that user, with the display and session
 bus of a process of theirs when they are logged in, so the change lands in the
 running session. A user who is not logged in has the settings written to their
-files, which apply at the next login. A file the script creates in a user's
+files, which apply at the next login: the KDE and LXQt files directly, and the
+xfconf and gsettings ones through a private bus started for each command with
+`dbus-run-session`, because without a bus those tools report success and keep
+nothing. Where `dbus-run-session` is not installed, those settings are skipped
+and the output says so. A file the script creates in a user's
 home is handed to that user, along with any directory it had to make on the
 way. A file or directory in the home that turns out to be a link to somewhere
 outside it is refused rather than written through as root, and reported as a
@@ -92,7 +96,9 @@ air.
 bash and root, on Linux. It expects systemd-logind or elogind, and without
 either it warns and settles for what UPower and acpid can do. Nothing to
 install: UPower, acpid and the desktop tools are each used when found and
-skipped when not. Nothing is changed outside `/etc` and the named users'
+skipped when not, and so is `dbus-run-session`, from the dbus package, which
+the desktop settings of a user who is not logged in need. Nothing is changed
+outside `/etc` and the named users'
 configuration directories, and every file it writes is named in its output.
 
 ## Tests
@@ -115,8 +121,9 @@ the files of a KDE, LXQt and XFCE user at once, and whose `xfconf-query` and
 `gsettings` are stand-ins that record what they are told and who told them.
 A dry run must change nothing, and a real run must write the drop-in where
 logind reads it, restart logind, set every setting as the user and not as
-root, list the settings its filter leaves for review, and then, run again,
-change nothing and say so.
+root, on a private bus since the user has no session, list the settings its
+filter leaves for review, and then, run again, change nothing and say so. A
+file in the user's home that links to somewhere outside it must be refused.
 
 On the way out, pass or fail, it puts every file in `/etc` back as it found
 it, restarts logind again if the drop-in changed, and removes the user. It
