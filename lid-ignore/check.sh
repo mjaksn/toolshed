@@ -149,6 +149,9 @@ refuses() {
 # of this one. The script resets DRY_RUN when sourced, so it is set after.
 in_script() { ( source "$script"; DRY_RUN=${DRY:-0}; "$@" ); }
 dry() { DRY=1 in_script "$@"; }
+# in_home HOME FUNCTION ARG...: in_script with the user's home set, for the
+# functions that work inside one.
+in_home() { ( source "$script"; DRY_RUN=0; U_HOME=$1; shift; "$@" ); }
 # users_after SETUP...: runs collect_users after the given command, and prints
 # the users it settled on, one per line.
 users_after() { ( source "$script"; "$@"; collect_users; printf '%s\n' ${USERS[@]+"${USERS[@]}"} ); }
@@ -292,6 +295,27 @@ expect "and leaves the file byte for byte" cmp -s "$f" "$f.before"
 out=$(dry ini_set "$tmp/ini/none" X y z)
 expect "a dry run says what it would set" says "[would] $tmp/ini/none: [X] y=z" "$out"
 expect "and creates nothing" test ! -e "$tmp/ini/none"
+
+echo "user_ini_set"
+home2=$tmp/home2
+mkdir "$home2"
+chown "$user:" "$home2"
+f=$home2/.config/lxqt/lxqt-powermanagement.conf
+in_home "$home2" user_ini_set "$user" "$f" General lidWatcherEnabled false >/dev/null
+expect "writes the file" holds "$f" '[General]\nlidWatcherEnabled=false\n'
+expect "and hands the user the file and every directory it made on the way" \
+    test "$(stat -c %U "$home2/.config" "$home2/.config/lxqt" "$f" | sort -u)" = "$user"
+printf 'outside\n' >"$tmp/outside"
+ln -s "$tmp/outside" "$home2/.config/powerdevilrc"
+out=$(in_home "$home2" user_ini_set "$user" "$home2/.config/powerdevilrc" 'AC][SuspendAndShutdown' LidAction 0 2>&1)
+expect "refuses a file that is a link to outside the home" \
+    says "[FAIL] $user: $home2/.config/powerdevilrc resolves to $(realpath "$tmp/outside"), outside their home" "$out"
+expect "and leaves what it points to alone" holds "$tmp/outside" 'outside\n'
+mkdir "$tmp/elsewhere"
+ln -s "$tmp/elsewhere" "$home2/.config/kde"
+out=$(in_home "$home2" user_ini_set "$user" "$home2/.config/kde/powerdevilrc" 'AC][SuspendAndShutdown' LidAction 0 2>&1)
+expect "and a directory on the way that is" says "outside their home" "$out"
+expect "writing nothing there" test -z "$(ls -A "$tmp/elsewhere")"
 
 echo "systemd_version"
 expect "reads the number from the first line of systemctl --version" \

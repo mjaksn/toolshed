@@ -282,15 +282,33 @@ as_user() {
 
 user_has() { printf '%s\n' ${U_ENV[@]+"${U_ENV[@]}"} | grep -q "^$1="; }
 
-# user_ini_set NAME FILE SECTION KEY VALUE   ini_set plus ownership fix.
+# user_ini_set NAME FILE SECTION KEY VALUE   ini_set for a file in the user's
+# home. This runs as root and the user owns every part of the path, so a path
+# that resolves outside their home, through a link they put there, is refused
+# rather than written through. A file it creates, and every directory it had
+# to make on the way, is handed to the user.
 user_ini_set() {
   local name=$1 file=$2
   shift 2
-  local existed=0
+  local home_real file_real top="" dir existed=0
+  home_real=$(realpath -e "$U_HOME" 2>/dev/null) || { fail "$name: home directory $U_HOME not found"; return 1; }
+  file_real=$(realpath -m "$file" 2>/dev/null)
+  if [[ $file_real != "$home_real"/* ]]; then
+    fail "$name: $file resolves to $file_real, outside their home; not written"
+    return 1
+  fi
+  dir=$(dirname "$file")
+  while [[ ! -e $dir && $dir != "$U_HOME" && $dir != / ]]; do
+    top=$dir
+    dir=$(dirname "$dir")
+  done
   [[ -e $file ]] && existed=1
   ini_set "$file" "$@"
-  if [[ $DRY_RUN -eq 0 && $existed -eq 0 && -e $file ]]; then
-    chown -R "$name:" "$(dirname "$file")" 2>/dev/null || true
+  [[ $DRY_RUN -eq 1 ]] && return 0
+  if [[ -n $top && -e $top ]]; then
+    chown -R "$name:" "$top" 2>/dev/null || true
+  elif [[ $existed -eq 0 && -e $file ]]; then
+    chown "$name:" "$file" 2>/dev/null || true
   fi
 }
 

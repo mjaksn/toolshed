@@ -77,7 +77,10 @@ Commands run on a user's behalf run as that user, with the display and session
 bus of a process of theirs when they are logged in, so the change lands in the
 running session. A user who is not logged in has the settings written to their
 files, which apply at the next login. A file the script creates in a user's
-home is handed to that user.
+home is handed to that user, along with any directory it had to make on the
+way. A file or directory in the home that turns out to be a link to somewhere
+outside it is refused rather than written through as root, and reported as a
+failure.
 
 The last lines of the output say how to confirm it worked: close the lid, check
 that SSH still answers, and check that the journal shows no new suspend. They
