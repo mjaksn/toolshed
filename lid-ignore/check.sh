@@ -36,6 +36,16 @@ fi
 # desktop as well. Every run below says which user it wants instead.
 unset SUDO_USER
 
+# An acpid rule named for nothing, whose event pattern is the lid: acpid
+# matches on the pattern, so the script has to look inside. The cleanup
+# removes it, with any directory made for it, so it may not exist already.
+rule=/etc/acpi/events/lc-check-laptop
+made_acpi=()
+if [[ -e $rule ]]; then
+    echo "check.sh: $rule already exists, and the cleanup would remove it" >&2
+    exit 1
+fi
+
 dropin=/etc/systemd/logind.conf.d/99-ignore-lid.conf
 dropin_dir=$(dirname "$dropin")
 # Every file in /etc the script can touch. Each is copied aside now and put
@@ -65,6 +75,12 @@ for f in "${etc_files[@]}"; do
         exit 1
     fi
 done
+for d in /etc/acpi /etc/acpi/events; do
+    [[ -d $d ]] && continue
+    mkdir "$d"
+    made_acpi+=("$d")
+done
+printf 'event=button/lid.*\naction=/bin/true\n' >"$rule"
 # A copy nobody can read wherever the checkout is, for the test that runs the
 # script without root.
 cp lid-ignore.sh "$tmp"
@@ -103,11 +119,17 @@ cleanup() {
         esac
     done
     [[ $made_dropin_dir -eq 1 ]] && rmdir "$dropin_dir" 2>/dev/null
+    rm -f "$rule"
+    local i
+    for ((i = ${#made_acpi[@]} - 1; i >= 0; i--)); do
+        rmdir "${made_acpi[i]}" 2>/dev/null
+    done
     pkill -u "$user" 2>/dev/null
     id "$user" >/dev/null 2>&1 && userdel -r "$user" 2>/dev/null
     # Judged by what is left rather than by each step. A run that leaves the
     # user or an unexpected drop-in behind fails, however its tests went.
     [[ -e $dropin && ! -f $backup/${dropin//\//_} ]] && left+="$dropin"$'\n'
+    [[ -e $rule ]] && left+="$rule"$'\n'
     id "$user" >/dev/null 2>&1 && left+="user $user"$'\n'
     [[ -e /home/$user ]] && left+="/home/$user"$'\n'
     rm -rf -- "$tmp"
@@ -426,6 +448,8 @@ if [[ -f $backup/_etc_default_acpi-support ]]; then
 else
     echo "skip  acpi-support, which is not installed here"
 fi
+expect "an acpid rule whose event pattern names the lid is reported, whatever its name" \
+    says "acpid rule $rule (event=button/lid.*) may act on the lid" "$out"
 expect "the user has no session bus, so each tool gets a private one" \
     says "no session bus for $user; running each desktop tool on a private bus" "$out"
 expect "and the tools did run on one" grep -q '^unix:' "$state/bus"

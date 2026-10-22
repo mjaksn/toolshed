@@ -203,13 +203,25 @@ configure_upower() {
 
 configure_acpid() {
   section "acpid / acpi-support"
-  local found=0 f
+  local found=0 f ev
   if [[ -f /etc/default/acpi-support ]]; then
     found=1
     kv_set /etc/default/acpi-support LID_SLEEP false && CHANGED_ACPID=1
   fi
   shopt -s nullglob
-  for f in /etc/acpi/events/*[Ll][Ii][Dd]* /etc/acpi/actions/*[Ll][Ii][Dd]*; do
+  # acpid matches a rule by its event= pattern, not by its name, so a rule
+  # named anything can act on the lid. One whose pattern names the lid, or
+  # catches every event, is reported, and so is any action named for the lid.
+  for f in /etc/acpi/events/*; do
+    [[ -f $f ]] || continue
+    ev=$(grep -Ei '^[[:space:]]*event=' "$f" 2>/dev/null | head -n1)
+    if [[ $f == *[Ll][Ii][Dd]* ]] \
+       || grep -Eiq '^[[:space:]]*event=[[:space:]]*(.*lid.*|\.\*|\*|button/?\.?\*)[[:space:]]*$' <<<"$ev"; then
+      found=1
+      warn "acpid rule $f (${ev:-no event line}) may act on the lid; review it and its action"
+    fi
+  done
+  for f in /etc/acpi/actions/*[Ll][Ii][Dd]*; do
     found=1
     warn "custom acpid lid handler present: $f (review it; it may still act on lid close)"
   done
