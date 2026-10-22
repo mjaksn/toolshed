@@ -95,15 +95,25 @@ restart() {
 }
 
 cleanup() {
-    local status=$? f saved left="" was now
+    local status=$? f saved left="" was now kept=0
     for f in "${etc_files[@]}"; do
         saved=$backup/${f//\//_}
         was=$(cat "$saved" 2>/dev/null)
         now=$(cat "$f" 2>/dev/null)
+        # A file that could not be put back, or taken away, is reported with
+        # where its copy is, and its service is left alone rather than
+        # restarted against the wrong configuration.
         if [[ -f $saved ]]; then
-            cp -p "$saved" "$f"
-        else
-            rm -f "$f"
+            if ! cp -p "$saved" "$f" || ! cmp -s "$saved" "$f"; then
+                echo "check.sh: could not put $f back; its original is at $saved" >&2
+                kept=1
+                status=1
+                continue
+            fi
+        elif ! rm -f "$f" || [[ -e $f ]]; then
+            echo "check.sh: could not remove $f, which the check created" >&2
+            status=1
+            continue
         fi
         [[ $was == "$now" ]] && continue
         # The effective setting goes back to what it was, not just the file,
@@ -132,7 +142,11 @@ cleanup() {
     [[ -e $rule ]] && left+="$rule"$'\n'
     id "$user" >/dev/null 2>&1 && left+="user $user"$'\n'
     [[ -e /home/$user ]] && left+="/home/$user"$'\n'
-    rm -rf -- "$tmp"
+    if [[ $kept -eq 1 ]]; then
+        echo "check.sh: keeping $tmp, which holds the originals under $backup" >&2
+    else
+        rm -rf -- "$tmp"
+    fi
     if [[ -n $left ]]; then
         echo "check.sh: the cleanup left these behind:" >&2
         printf '%s' "$left" >&2
