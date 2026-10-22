@@ -83,9 +83,14 @@ write_file() {
 }
 
 # kv_set FILE KEY VALUE   for sectionless KEY=VALUE files (/etc/default/*).
+# These files are sourced, so the last assignment wins: the key counts as set
+# only when every assignment of it has the value, and otherwise the edit below
+# rewrites them all.
 kv_set() {
   local file=$1 key=$2 value=$3
-  if grep -Eq "^[[:space:]]*${key}=${value}[[:space:]]*$" "$file" 2>/dev/null; then
+  if [[ -f $file ]] && awk -v k="$key" -v v="$value" '
+      $0 ~ "^[[:space:]]*" k "=" { n++; if ($0 != k "=" v) off = 1 }
+      END { exit !(n && !off) }' "$file"; then
     ok "$file: $key=$value already set"
     return 0
   fi

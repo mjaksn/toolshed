@@ -287,6 +287,11 @@ expect "replaces one that is there, however indented, and keeps the rest" holds 
 out=$(in_script kv_set "$f" LID_SLEEP false)
 expect "says when it is already set" says "$f: LID_SLEEP=false already set" "$out"
 expect "and leaves the file alone" holds "$f" 'LID_SLEEP=false\nOTHER=x\n'
+printf 'LID_SLEEP=false\nLID_SLEEP=true\n' >"$f"
+in_script kv_set "$f" LID_SLEEP false >/dev/null
+expect "rewrites every assignment when a later one overrides the value, since the last wins" \
+    holds "$f" 'LID_SLEEP=false\nLID_SLEEP=false\n'
+printf 'LID_SLEEP=false\nOTHER=x\n' >"$f"
 out=$(dry kv_set "$f" LID_SLEEP true)
 expect "a dry run says what it would set" says "[would] $f: LID_SLEEP=true" "$out"
 expect "and sets nothing" holds "$f" 'LID_SLEEP=false\nOTHER=x\n'
