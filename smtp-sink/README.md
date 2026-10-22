@@ -249,6 +249,61 @@ for its server. Both are allowed, because a receiver on the same LAN is the
 common case, but reaching anything further off is what `https` with checked
 certificates is for.
 
+## Running it in Docker
+
+The `Dockerfile` here builds an image holding the sink and nothing else, and
+`compose.yaml` runs it, under `docker compose` or as an Arcane project. Docker
+is the only thing the host needs. Build the image from this directory on the
+host that will run it:
+
+```
+docker build -t smtp-sink:local .
+```
+
+The image exists only on that host, which is why the compose file says
+`pull_policy: never`; there is no registry to pull it from. Then either start
+it directly:
+
+```
+docker compose up -d
+```
+
+or, in Arcane, create a project, paste in `compose.yaml`, set the variables
+below in its `.env` editor, and create it, which starts it. Arcane drives the
+same Docker the image was built in, so it finds the image. Its **Redeploy**
+pulls images first; if that complains about `smtp-sink:local`, choose never
+pull in the **Deploy** menu, or **Up** instead.
+
+| Variable | Effect |
+| --- | --- |
+| `SMTP_SINK_ADDRESS` | Host address the port is published on, `127.0.0.1` by default, so out of the box only the host itself can send. Set the host's LAN address for devices on the LAN. |
+| `SMTP_SINK_PORT` | Host port, 2525 by default. 25 works too, for a device that only sends to the standard port, and needs no privileges inside the container, which listens on 2525 either way. |
+| `TZ` | Time zone for the timestamps in the log and the webhook, such as `America/Chicago`. UTC by default. |
+
+Inside the container the sink binds `0.0.0.0`, which is only the container's
+own network. The care the warning below asks of `--bind` moves to
+`SMTP_SINK_ADDRESS`, and matters more there: a port Docker publishes on every
+address of the host is reachable whatever ufw says, because Docker writes its
+own firewall rules ahead of ufw's.
+
+Syslog and webhook options go in the compose file's `command:`, as they would
+on the command line; the bind address, port and log file are set already. A
+syslog server or webhook on the host itself is not at `127.0.0.1` from inside
+the container; use the host's LAN address.
+
+The log is `/data/smtp_sink.log` on a named volume, so it survives the
+container being recreated. `docker exec smtp-sink tail -f /data/smtp_sink.log`
+follows it, and `docker logs smtp-sink` shows what the sink prints, a line per
+message. The sink runs as uid 10001; a host directory mounted on `/data` in
+place of the volume has to be writable by that uid, or every message draws a
+451.
+
+The container restarts with Docker, and after a crash, until it is stopped by
+hand. Arcane is only a view onto Docker, so the sink keeps running whether
+Arcane is up or not. To update it, build the image again with the same tag and
+run `docker compose up -d`, or **Up** in Arcane, which sees the new image and
+recreates the container.
+
 ## Tests
 
 ```

@@ -1,0 +1,32 @@
+# smtp-sink as a Compose project, for docker compose or for Arcane. The image
+# is built on the same host first, as the README describes; nothing here pulls
+# it from a registry, because it is in none.
+#
+# Set these in a .env file beside this one, or in Arcane's .env editor:
+#
+#   SMTP_SINK_ADDRESS  host address to publish on; the host's LAN address
+#                      for devices on the LAN, 127.0.0.1 for this host only
+#   SMTP_SINK_PORT     host port, 2525 by default; 25 for a device that can
+#                      only send to the standard port
+#   TZ                 time zone for the timestamps, UTC by default
+
+services:
+  smtp-sink:
+    image: smtp-sink:local
+    pull_policy: never
+    container_name: smtp-sink
+    # The sink puts this name in each syslog line and webhook body. Without
+    # it, that would be the container ID, which changes on every recreate.
+    hostname: smtp-sink
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+    ports:
+      - "${SMTP_SINK_ADDRESS:-127.0.0.1}:${SMTP_SINK_PORT:-2525}:2525"
+    volumes:
+      - smtp-sink-data:/data
+    # Forwarding options go here, as they would on the command line:
+    # command: ["--syslog", "192.168.1.10", "--syslog-body"]
+
+volumes:
+  smtp-sink-data:
