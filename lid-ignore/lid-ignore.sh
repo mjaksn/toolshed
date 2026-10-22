@@ -337,14 +337,17 @@ xfconf_set() {
     || fail "$name: could not set xfconf $prop"
 }
 
+# The greps here read to the end rather than stopping at the match with -q:
+# under pipefail, a grep that stops early can hand gsettings a broken pipe and
+# fail the pipeline on a schema that is there.
 gsettings_schema_exists() {
-  as_user "$1" gsettings list-schemas 2>/dev/null | grep -qx "$2"
+  as_user "$1" gsettings list-schemas 2>/dev/null | grep -x "$2" >/dev/null
 }
 
 # gsettings_set NAME SCHEMA KEY VALUE   Returns 1 if the key does not exist.
 gsettings_set() {
   local name=$1 schema=$2 key=$3 value=$4 cur
-  as_user "$name" gsettings list-keys "$schema" 2>/dev/null | grep -qx "$key" || return 1
+  as_user "$name" gsettings list-keys "$schema" 2>/dev/null | grep -x "$key" >/dev/null || return 1
   cur=$(as_user "$name" gsettings get "$schema" "$key" 2>/dev/null)
   if [[ $cur == "$value" ]]; then
     ok "$name: $schema $key already $value"
