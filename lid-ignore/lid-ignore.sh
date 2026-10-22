@@ -115,7 +115,7 @@ ini_set() {
   mkdir -p "$(dirname "$file")" || { fail "could not create $(dirname "$file")"; return 1; }
   [[ -f $file ]] || : > "$file"
   local tmp
-  tmp=$(mktemp) || return 1
+  tmp=$(mktemp) || { fail "could not create a temporary file for $file"; return 1; }
   awk -v s="[$section]" -v k="$key" -v v="$value" '
     function flush() {
       if (insec && !done) { print k "=" v; done = 1 }
