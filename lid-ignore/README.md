@@ -80,11 +80,9 @@ files, which apply at the next login: the KDE and LXQt files directly, and the
 xfconf and gsettings ones through a private bus started for each command with
 `dbus-run-session`, because without a bus those tools report success and keep
 nothing. Where `dbus-run-session` is not installed, those settings are skipped
-and the output says so. A file the script creates in a user's
-home is handed to that user, along with any directory it had to make on the
-way. A file or directory in the home that turns out to be a link to somewhere
-outside it is refused rather than written through as root, and reported as a
-failure.
+and the output says so. Edits to a user's files are made as that user rather
+than as root, so a link planted in their home cannot lead the script to write
+anywhere else, and whatever it creates there is theirs from the start.
 
 The last lines of the output say how to confirm it worked: close the lid, check
 that SSH still answers, and check that the journal shows no new suspend. They
@@ -122,8 +120,9 @@ the files of a KDE, LXQt and XFCE user at once, and whose `xfconf-query` and
 A dry run must change nothing, and a real run must write the drop-in where
 logind reads it, restart logind, set every setting as the user and not as
 root, on a private bus since the user has no session, list the settings its
-filter leaves for review, and then, run again, change nothing and say so. A
-file in the user's home that links to somewhere outside it must be refused.
+filter leaves for review, and then, run again, change nothing and say so. An
+edit to a user's file must run as that user, so a link in their home to a
+file only root can write fails rather than writes.
 
 On the way out, pass or fail, it puts every file in `/etc` back as it found
 it, restarts logind again if the drop-in changed, and removes the user. It

@@ -266,16 +266,22 @@ user_env() {
   return 0
 }
 
-# as_user NAME CMD...   run as the user with their session environment, or on
-# a private bus when they have none: U_BUS is set by configure_user_desktops.
+# as_user [--no-bus] NAME CMD...   run as the user with their session
+# environment, or on a private bus when they have none: U_BUS is set by
+# configure_user_desktops. --no-bus is for a command that needs no bus.
 as_user() {
+  local -a bus=(${U_BUS[@]+"${U_BUS[@]}"})
+  if [[ $1 == --no-bus ]]; then
+    bus=()
+    shift
+  fi
   local name=$1; shift
   local -a envargs=(HOME="$U_HOME" USER="$name" LOGNAME="$name" PATH="$PATH")
   [[ -d /run/user/$U_UID ]] && envargs+=(XDG_RUNTIME_DIR="/run/user/$U_UID")
   if command -v runuser >/dev/null 2>&1; then
-    runuser -u "$name" -- env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} ${U_BUS[@]+"${U_BUS[@]}"} "$@"
+    runuser -u "$name" -- env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} ${bus[@]+"${bus[@]}"} "$@"
   elif command -v sudo >/dev/null 2>&1; then
-    sudo -u "$name" env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} ${U_BUS[@]+"${U_BUS[@]}"} "$@"
+    sudo -u "$name" env -i "${envargs[@]}" ${U_ENV[@]+"${U_ENV[@]}"} ${bus[@]+"${bus[@]}"} "$@"
   else
     fail "need runuser or sudo to run commands as $name"
     return 1
@@ -284,34 +290,21 @@ as_user() {
 
 user_has() { printf '%s\n' ${U_ENV[@]+"${U_ENV[@]}"} | grep -q "^$1="; }
 
-# user_ini_set NAME FILE SECTION KEY VALUE   ini_set for a file in the user's
-# home. This runs as root and the user owns every part of the path, so a path
-# that resolves outside their home, through a link they put there, is refused
-# rather than written through. A file it creates, and every directory it had
-# to make on the way, is handed to the user.
+# user_ini_set NAME FILE SECTION KEY VALUE   ini_set, run as the user. This
+# script runs as root and the user owns every part of the path, so a root
+# write there could be led through a link to any file on the machine, and no
+# check beforehand closes that, since the link can appear after the check.
+# Run as the user, the edit reaches only what the user can, and whatever it
+# creates is theirs from the start. The child counts its own failures and
+# hands them back as its exit status.
 user_ini_set() {
-  local name=$1 file=$2
-  shift 2
-  local home_real file_real top="" dir existed=0
-  home_real=$(realpath -e "$U_HOME" 2>/dev/null) || { fail "$name: home directory $U_HOME not found"; return 1; }
-  file_real=$(realpath -m "$file" 2>/dev/null)
-  if [[ $file_real != "$home_real"/* ]]; then
-    fail "$name: $file resolves to $file_real, outside their home; not written"
-    return 1
-  fi
-  dir=$(dirname "$file")
-  while [[ ! -e $dir && $dir != "$U_HOME" && $dir != / ]]; do
-    top=$dir
-    dir=$(dirname "$dir")
-  done
-  [[ -e $file ]] && existed=1
-  ini_set "$file" "$@"
-  [[ $DRY_RUN -eq 1 ]] && return 0
-  if [[ -n $top && -e $top ]]; then
-    chown -R "$name:" "$top" 2>/dev/null || true
-  elif [[ $existed -eq 0 && -e $file ]]; then
-    chown "$name:" "$file" 2>/dev/null || true
-  fi
+  local name=$1
+  shift
+  as_user --no-bus "$name" bash -c "$(declare -f ok change fail ini_set)
+DRY_RUN=$DRY_RUN FAILURES=0
+C_OK=${C_OK@Q} C_CHG=${C_CHG@Q} C_WARN=${C_WARN@Q} C_RST=${C_RST@Q}
+ini_set \"\$@\"
+exit \$(( FAILURES > 0 ))" ini_set "$@" || FAILURES=$((FAILURES + 1))
 }
 
 # xfce_pm_running UID   whether xfce4-power-manager is running for the user.

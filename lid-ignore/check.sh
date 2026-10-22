@@ -155,7 +155,7 @@ in_script() { ( source "$script"; DRY_RUN=${DRY:-0}; "$@" ); }
 dry() { DRY=1 in_script "$@"; }
 # in_home HOME FUNCTION ARG...: in_script with the user's home set, for the
 # functions that work inside one.
-in_home() { ( source "$script"; DRY_RUN=0; U_HOME=$1; shift; "$@" ); }
+in_home() { ( source "$script"; DRY_RUN=0; U_HOME=$1; U_UID=$uid; shift; "$@" ); }
 # users_after SETUP...: runs collect_users after the given command, and prints
 # the users it settled on, one per line.
 users_after() { ( source "$script"; "$@"; collect_users; printf '%s\n' ${USERS[@]+"${USERS[@]}"} ); }
@@ -313,19 +313,26 @@ chown "$user:" "$home2"
 f=$home2/.config/lxqt/lxqt-powermanagement.conf
 in_home "$home2" user_ini_set "$user" "$f" General lidWatcherEnabled false >/dev/null
 expect "writes the file" holds "$f" '[General]\nlidWatcherEnabled=false\n'
-expect "and hands the user the file and every directory it made on the way" \
+expect "as the user, so the file and every directory made on the way are theirs" \
     test "$(stat -c %U "$home2/.config" "$home2/.config/lxqt" "$f" | sort -u)" = "$user"
+# Links the user could plant, to a file and to a directory that only root can
+# write. An edit made as the user fails at them; one made as root would not.
 printf 'outside\n' >"$tmp/outside"
 ln -s "$tmp/outside" "$home2/.config/powerdevilrc"
 out=$(in_home "$home2" user_ini_set "$user" "$home2/.config/powerdevilrc" 'AC][SuspendAndShutdown' LidAction 0 2>&1)
-expect "refuses a file that is a link to outside the home" \
-    says "[FAIL] $user: $home2/.config/powerdevilrc resolves to $(realpath "$tmp/outside"), outside their home" "$out"
-expect "and leaves what it points to alone" holds "$tmp/outside" 'outside\n'
+expect "cannot be led through a link to a file the user cannot write" \
+    says "[FAIL] could not edit $home2/.config/powerdevilrc" "$out"
+expect "and leaves that file alone" holds "$tmp/outside" 'outside\n'
 mkdir "$tmp/elsewhere"
 ln -s "$tmp/elsewhere" "$home2/.config/kde"
 out=$(in_home "$home2" user_ini_set "$user" "$home2/.config/kde/powerdevilrc" 'AC][SuspendAndShutdown' LidAction 0 2>&1)
-expect "and a directory on the way that is" says "outside their home" "$out"
+expect "nor into a directory the user cannot write" says "[FAIL] could not edit $home2/.config/kde/powerdevilrc" "$out"
 expect "writing nothing there" test -z "$(ls -A "$tmp/elsewhere")"
+expect "and the failure is counted" test "$(in_home "$home2" eval \
+    'user_ini_set "$user" "$home2/.config/powerdevilrc" X k v >/dev/null 2>&1; echo "$FAILURES"')" = 1
+expect "a dry run as the user reports and writes nothing" \
+    test "$(DRY=1 in_home "$home2" eval 'DRY_RUN=1; user_ini_set "$user" "$home2/.config/new.conf" X k v' 2>&1)" = "[would] $home2/.config/new.conf: [X] k=v"
+expect "not even the file" test ! -e "$home2/.config/new.conf"
 
 echo "systemd_version"
 expect "reads the number from the first line of systemctl --version" \
