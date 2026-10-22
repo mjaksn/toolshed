@@ -35,6 +35,10 @@ a repository of its own goes in here.
 - [install-modules](install-modules/), a PowerShell script that links every
   module in the shed into PowerShell's module path, for PowerShell 7 or
   Windows PowerShell 5.1 or both, so they autoload by name in any session.
+- [lid-ignore](lid-ignore/), a bash script that makes a laptop running Linux
+  ignore its lid, so it can run closed as a server: it sets the login manager,
+  UPower, acpid and whichever desktop environments it finds, reports each
+  change, and is safe to run again.
 - [lock-hashes](lock-hashes/), a Python script that rewrites a pip requirements
   file so every pin carries the hashes `pip install --require-hashes` checks
   against, with a check mode for CI. Standard library only.
@@ -117,7 +121,7 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Twelve tools have a check so far. `dispatch-desk` runs PSScriptAnalyzer, fetched
+Thirteen tools have a check now. `dispatch-desk` runs PSScriptAnalyzer, fetched
 from the gallery and verified against a recorded hash rather than installed, so
 what the check ran against is the same module every time. That is the same
 arrangement the tool already uses for powershell-yaml at run time, and for the
@@ -130,10 +134,12 @@ install first. `WinEvents` installs its test dependencies, pinned by version and
 hash, and runs `pytest`. `lock-hashes`, `ha-rest-yaml`, `smtp-sink` and
 `ReceiveFile` run their own tests under `unittest`, with nothing to install;
 the last two start their real servers on the loopback address and talk to them
-in SMTP and HTTP, so they need no network and no privileges. `easy-systemd` is
-the exception to that: it installs, restarts and removes real services on the
-runner's own systemd and checks what each one ends up running, so it needs
-root, which it takes with `sudo`. Those last seven each keep the command in a
+in SMTP and HTTP, so they need no network and no privileges. `easy-systemd`
+and `lid-ignore` are the exceptions to that: the first installs, restarts and
+removes real services on the runner's own systemd and checks what each one
+ends up running, and the second writes the logind drop-in, restarts logind and
+configures a throwaway user, then puts everything back as it was; both need
+root, which they take with `sudo`. Those last eight each keep the command in a
 `check.sh` beside its `ci.json`, so the check CI runs is one a person can run
 too.
 

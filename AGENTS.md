@@ -66,7 +66,7 @@ change touched. CI installs ruff from
 version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-Twelve tools have a check. `cd dispatch-desk && ./check.ps1` runs
+Thirteen tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and then `test.ps1`, and takes about a
 minute the first time, because it fetches the analyzer and the YAML parser,
 and seconds afterwards from the cache. It passes with nothing reported and 88
@@ -98,10 +98,16 @@ reinstalls, restarts and removes real services named `es-check-*` and checks
 what each one runs. It needs Linux booted with systemd, and root, which it
 takes with sudo when started without it, and it removes everything it
 created on the way out, pass or fail. It takes about six seconds; it cannot
-run on Windows itself, and was run under WSL. `cd ReceiveFile && bash
-./check.sh` runs that tool's 25 unittest tests with nothing to install; they
-start the real server on the loopback address, on a port the operating system
-picks, saving into a temporary directory, and take about two seconds.
+run on Windows itself, and was run under WSL. `cd lid-ignore && bash
+./check.sh` tries that script's file helpers on files of their own and then
+runs it for real: it writes the logind drop-in, restarts logind and
+configures a throwaway user named `lid-check` whose desktop tools are
+stand-ins, and it puts every file in `/etc` back and removes the user on the
+way out, pass or fail. It has the same needs as the easy-systemd check,
+takes about three seconds, and was also run under WSL. `cd ReceiveFile &&
+bash ./check.sh` runs that tool's 25 unittest tests with nothing to install;
+they start the real server on the loopback address, on a port the operating
+system picks, saving into a temporary directory, and take about two seconds.
 Every one of these was run in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
