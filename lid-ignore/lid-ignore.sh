@@ -458,7 +458,8 @@ main() {
     case $1 in
       --dry-run)   DRY_RUN=1 ;;
       --all-users) ALL_USERS=1 ;;
-      --user)      [[ $# -ge 2 ]] || usage 1; USERS+=("$2"); shift ;;
+      --user)      [[ $# -ge 2 && -n $2 && $2 != -* ]] || { echo "--user needs a name" >&2; usage 1; }
+                   USERS+=("$2"); shift ;;
       -h|--help)   usage 0 ;;
       *)           echo "unknown option: $1" >&2; usage 1 ;;
     esac

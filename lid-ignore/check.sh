@@ -385,7 +385,10 @@ echo "Options"
 expect "--help prints the usage and exits 0" \
     bash -c 'bash "$1" --help | grep -q "^Usage: sudo ./lid-ignore.sh"' _ "$script"
 refuses "an unknown option" "unknown option: --bogus" bash "$script" --bogus
-refuses "--user without a name" "Usage:" bash "$script" --user
+refuses "--user without a name" "--user needs a name" bash "$script" --user
+# Which would otherwise take the option as the name and turn a dry run real.
+refuses "--user followed by an option" "--user needs a name" bash "$script" --user --dry-run
+refuses "--user followed by nothing" "--user needs a name" bash "$script" --user ''
 refuses "running without root" "must run as root" runuser -u nobody -- bash "$tmp/lid-ignore.sh" --dry-run
 
 echo "Dry run"
