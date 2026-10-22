@@ -107,13 +107,16 @@ kv_set() {
 
 # ini_set FILE SECTION KEY VALUE   Idempotent INI edit. SECTION is the text
 # between the brackets; nested KDE groups like "AC][SuspendAndShutdown" work.
+# The key counts as set only when every entry of it in the section has the
+# value, since a reader may take the last; otherwise the edit below keeps the
+# first entry, with the value, and drops the rest.
 ini_set() {
   local file=$1 section=$2 key=$3 value=$4
   if [[ -f $file ]] && awk -v s="[$section]" -v k="$key" -v v="$value" '
       $0 == s { insec = 1; next }
       /^\[/   { insec = 0 }
-      insec && index($0, k "=") == 1 { if ($0 == k "=" v) found = 1 }
-      END { exit !found }' "$file"; then
+      insec && index($0, k "=") == 1 { n++; if ($0 != k "=" v) off = 1 }
+      END { exit !(n && !off) }' "$file"; then
     ok "$file: [$section] $key=$value already set"
     return 0
   fi

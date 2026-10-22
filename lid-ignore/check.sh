@@ -328,6 +328,10 @@ expect "appends a missing section after a blank line" holds "$f" '[A]\nk=1\n\n[B
 printf '[A]\nLidActionX=1\n' >"$f"
 in_script ini_set "$f" A LidAction 0 >/dev/null
 expect "does not mistake a longer key for the one asked for" holds "$f" '[A]\nLidActionX=1\nLidAction=0\n'
+printf '[UPower]\nIgnoreLid=true\nIgnoreLid=false\n' >"$f"
+in_script ini_set "$f" UPower IgnoreLid true >/dev/null
+expect "drops a duplicate that overrides the value rather than calling it set" \
+    holds "$f" '[UPower]\nIgnoreLid=true\n'
 rm "$f"
 in_script ini_set "$f" 'AC][SuspendAndShutdown' LidAction 0 >/dev/null
 expect "takes the nested groups KDE uses" holds "$f" '[AC][SuspendAndShutdown]\nLidAction=0\n'
