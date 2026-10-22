@@ -194,7 +194,9 @@ snapshot() {
 # LXQt and XFCE user at once. The KDE profile holds one of the three sections
 # already, with the lid set to do something, so the test sees both an edit in
 # place and two additions.
-useradd -m -s /bin/bash "$user" 2>/dev/null || { echo "check.sh: could not create $user" >&2; exit 1; }
+# At the path the clash check and the cleanup look at, whatever the host's
+# default home base is.
+useradd -m -d "/home/$user" -s /bin/bash "$user" 2>/dev/null || { echo "check.sh: could not create $user" >&2; exit 1; }
 uid=$(id -u "$user")
 home=$(getent passwd "$user" | cut -d: -f6)
 cfg=$home/.config
