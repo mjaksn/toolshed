@@ -206,8 +206,19 @@ configure_upower() {
   fi
   ini_set "$conf" UPower IgnoreLid true
   [[ $DRY_RUN -eq 1 ]] && return
-  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet upower 2>/dev/null; then
-    run systemctl restart upower || warn "could not restart upower; takes effect on next boot"
+  # Restarted where it is running, under whichever service manager there is,
+  # as logind is above; a daemon left running keeps its old policy.
+  if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet upower 2>/dev/null \
+      && { run systemctl restart upower || warn "could not restart upower; takes effect on next boot"; }
+  elif command -v rc-service >/dev/null 2>&1; then
+    rc-service upower status >/dev/null 2>&1 \
+      && { run rc-service upower restart || warn "could not restart upower; takes effect on next boot"; }
+  elif command -v service >/dev/null 2>&1; then
+    service upower status >/dev/null 2>&1 \
+      && { run service upower restart || warn "could not restart upower; takes effect on next boot"; }
+  else
+    info "restart upower by hand, or reboot, for the change to apply"
   fi
 }
 
