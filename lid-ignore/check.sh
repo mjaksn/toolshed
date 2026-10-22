@@ -297,6 +297,10 @@ expect "a dry run says what it would set" says "[would] $f: LID_SLEEP=true" "$ou
 expect "and sets nothing" holds "$f" 'LID_SLEEP=false\nOTHER=x\n'
 in_script kv_set "$tmp/kv-new" LID_SLEEP false >/dev/null
 expect "a file that is not there is created" holds "$tmp/kv-new" 'LID_SLEEP=false\n'
+printf 'OTHER=1' >"$f"
+in_script kv_set "$f" LID_SLEEP false >/dev/null
+expect "an appended key starts on its own line when the file ends without one" \
+    holds "$f" 'OTHER=1\nLID_SLEEP=false\n'
 
 echo "ini_set"
 f=$tmp/ini/UPower.conf

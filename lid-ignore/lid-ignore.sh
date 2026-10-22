@@ -99,6 +99,8 @@ kv_set() {
   if grep -Eq "^[[:space:]]*${key}=" "$file" 2>/dev/null; then
     sed -i -E "s|^[[:space:]]*${key}=.*|${key}=${value}|" "$file" || fail "could not edit $file"
   else
+    # On a line of its own, even when the file ends without a line break.
+    [[ -s $file && -n $(tail -c1 "$file") ]] && printf '\n' >> "$file"
     printf '%s=%s\n' "$key" "$value" >> "$file" || fail "could not append to $file"
   fi
 }
