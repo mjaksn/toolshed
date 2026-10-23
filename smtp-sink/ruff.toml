@@ -10,7 +10,7 @@
 
 [lint]
 ignore = [
-    # Six blind `except Exception` handlers, each one a deliberate bulkhead:
+    # Seven blind `except Exception` handlers, each one a deliberate bulkhead:
     #   - `send_syslog`, where the remote server is a UDP or TCP endpoint that can
     #     fail in as many ways as the network has; the message is already in the log
     #     file by then, so a failed forward is reported on stderr and nothing more;
@@ -24,6 +24,9 @@ ignore = [
     #   - reading the message for the webhook's JSON, where whatever the parser or a
     #     part can raise costs the fields read from the message, and the envelope
     #     and the raw message still go out;
+    #   - decoding the text written below a message in the log file, where a
+    #     message that cannot be read costs that text and never its place in the
+    #     file, or the client a 250;
     #   - `wait_closed` in that handler's finally block, below.
     "BLE001",
 

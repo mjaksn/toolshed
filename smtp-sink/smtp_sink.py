@@ -3,7 +3,8 @@
 Minimal LAN-only SMTP sink.
 
 Accepts any message from any sender to any recipient, appends the raw
-message (plus a small envelope header) to a log file, and optionally
+message (plus a small envelope header, and below it its subject and text,
+decoded, when neither would read plainly) to a log file, and optionally
 forwards a summary (or the body too) to a syslog server and the whole
 message, as JSON, to a webhook. It never relays, authenticates, or stores
 mailboxes. Standard library only.
@@ -127,6 +128,15 @@ MAX_PARSED_DEFECTS = 100
 # The headers the email package splits into parameters; see BoundedMessage.
 PARAM_HEADERS = {"content-type", "content-disposition"}
 
+# The transfer encodings that hide a part's text from someone reading the log
+# file, the ones `get_payload(decode=True)` undoes; see log_text.
+HIDING_ENCODINGS = {"base64", "quoted-printable", "x-uuencode", "uuencode", "uue", "x-uue"}
+
+# The line between a message as received and the text decoded from it in the
+# log file. Not either of the rulers around the envelope, which anything
+# reading the file may split entries on.
+DECODED_RULER = "~~~ decoded text " + "~" * 61
+
 # A stretch of a header that is not ASCII, captured so that splitting on it
 # keeps it; see header_value.
 NON_ASCII_RUN = re.compile(r"([^\x00-\x7f]+)")
@@ -166,9 +176,14 @@ def log_message(log_path, peer, mail_from, rcpts, body, received, delivery=None)
     log file's. Queued anywhere later, a message logged first could still be
     queued second, by a client that took longer over its 250 or its syslog
     line. Returns whether the webhook took it, or None with no webhook.
+
+    The text decoded from the message for the file is worked out first,
+    outside the lock, because it means parsing the message, and every other
+    message's write would wait on that.
     """
+    text = log_text(body)
     with log_lock:
-        write_entry(log_path, peer, mail_from, rcpts, body, received)
+        write_entry(log_path, peer, mail_from, rcpts, body, received, text)
         if delivery is None or webhook is None:
             return None
         return webhook.submit(delivery)
@@ -179,7 +194,7 @@ def timestamp():
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def write_entry(log_path, peer, mail_from, rcpts, body, received=None):
+def write_entry(log_path, peer, mail_from, rcpts, body, received=None, text=None):
     """Append one message to the log file, byte for byte as it arrived.
 
     `body` is bytes and is written without being decoded, because a device is
@@ -188,8 +203,13 @@ def write_entry(log_path, peer, mail_from, rcpts, body, received=None):
     out would turn anything that is not UTF-8 into replacement characters and
     lose the original for good.
 
+    `text`, if given, is what log_text decoded from the message, and goes
+    below the message, after DECODED_RULER, as UTF-8. It is an addition to
+    the message as received, never a replacement for it.
+
     The envelope lines the sink adds around it end in LF while the message
-    keeps its own CRLF, so the file has mixed line endings by design.
+    keeps its own CRLF, so the file has mixed line endings by design. The
+    decoded text keeps whichever it decoded to.
 
     `received` is the time to record, now if not given. The handler passes
     the one it gives the webhook, so the two records of a message agree.
@@ -205,6 +225,10 @@ def write_entry(log_path, peer, mail_from, rcpts, body, received=None):
     entry = header.encode("utf-8") + body
     if not body.endswith(b"\n"):
         entry += b"\n"
+    if text is not None:
+        entry += (DECODED_RULER + "\n" + text).encode("utf-8")
+        if not text.endswith("\n"):
+            entry += b"\n"
     entry += b"\n"
     with log_lock, open(log_path, "ab") as f:
         f.write(entry)
@@ -713,12 +737,83 @@ def is_attachment(part):
     )
 
 
-def first_text(msg, content_type):
+def text_part(msg, content_type):
     """The first part of `content_type` that is not an attachment, or None."""
     for part in content_parts(msg):
         if part.get_content_type() == content_type and not is_attachment(part):
-            return clean(part_text(part))
+            return part
     return None
+
+
+def first_text(msg, content_type):
+    """The text of that part, decoded and cleaned, or None."""
+    part = text_part(msg, content_type)
+    return None if part is None else clean(part_text(part))
+
+
+def log_text(body):
+    """What to write below `body` in the log file, decoded, or None for none.
+
+    A device that sends a plain report base64 encoded, as Brother printers do,
+    leaves the file holding nothing a person can read, and one that puts an
+    accent in its subject sends that as encoded words. So a subject that
+    decoding changes is written as a `Subject:` line, and the text from
+    hidden_text after it, a blank line between the two when there are both.
+    A message with neither, which reads well enough as it came, gets nothing.
+
+    Nothing here may cost the message its place in the file, so one that
+    cannot be parsed or read simply gets nothing.
+    """
+    # A message with none of these has nothing hidden, and parsing is the
+    # dear part.
+    lowered = body.lower()
+    if not any(mark in lowered for mark in (b"content-transfer-encoding", b"multipart", b"=?")):
+        return None
+    try:
+        msg = parse_message(body)
+        subject = encoded_subject(msg)
+        text = hidden_text(msg)
+    except Exception:
+        return None
+    pieces = [] if subject is None else [f"Subject: {subject}\n"]
+    if text is not None:
+        pieces += ["\n", text] if pieces else [text]
+    return "".join(pieces) or None
+
+
+def encoded_subject(msg):
+    """The subject decoded, if it held encoded words that decoding changed.
+
+    Escaped as the envelope lines are, since it is one line of the file and an
+    encoded word can hold a line break or a terminal escape of its own.
+    """
+    for key, value in msg.raw_items():
+        if key.lower() == "subject":
+            if "=?" not in value:
+                return None
+            text = header_value(value)
+            return None if text == FOLD.sub("", value) else visible(text)
+    return None
+
+
+def hidden_text(msg):
+    """The message's text, if the log file would not otherwise show it plainly.
+
+    That is the first text/plain part, found as the webhook's `text` is, when
+    it was sent base64, quoted-printable or uuencoded, or sits inside a
+    multipart among its boundaries and attachments. None for one sent as it
+    is, and for text that is only blank.
+    """
+    part = text_part(msg, "text/plain")
+    if part is None:
+        return None
+    # Read as `get_payload` reads it, so text it left encoded is never
+    # written out as if it had been decoded.
+    encoding = str(part.get("Content-Transfer-Encoding", "")).strip().lower()
+    if encoding not in HIDING_ENCODINGS and not msg.is_multipart():
+        return None
+    text = clean(part_text(part))
+    return text if text.strip() else None
 
 
 def part_size(part):
