@@ -154,6 +154,110 @@ class WriteEntryTests(unittest.TestCase):
         self.assertIn("second", text)
         self.assertEqual(text.count("Received:"), 2)
 
+    def test_puts_decoded_text_below_the_message_as_received(self):
+        body = b"Subject: s\r\n\r\nZGVjb2RlZA==\r\n"
+        smtp_sink.write_entry(
+            str(self.log), ("192.0.2.7", 41234), "<a@example.test>", ["<b@example.test>"],
+            body, text="café\r\nsecond line",
+        )
+        raw = self.log.read_bytes()
+        message, ruler, after = raw.partition(smtp_sink.DECODED_RULER.encode("ascii") + b"\n")
+        self.assertTrue(ruler, raw)
+        self.assertTrue(message.endswith(body), raw)
+        # UTF-8, its own line endings kept, and the entry closed as ever.
+        self.assertEqual(after, "café\r\nsecond line\n\n".encode())
+
+    def test_writes_no_ruler_without_decoded_text(self):
+        self.assertNotIn(b"~~~", self.write_bytes(b"Subject: s\r\n\r\nplain\r\n"))
+
+
+# What a Brother printer sends as its e-mail report: a plain text report, base64
+# encoded, with the transfer encoding in capitals and a Latin-1 charset.
+BROTHER_TEXT = "<Device Status>\r\nTotal Page Count: 7700\r\n\tB&W: 5356\r\nNo. caf\xe9\r\n"
+BROTHER = (
+    "From: myprinter@local-brother-printer.example\r\n"
+    "Subject: =?ISO-8859-1?Q?E-mail Report(TXT)?=\r\n"
+    "MIME-Version: 1.0\r\n"
+    'Content-Type: text/plain; charset="ISO-8859-1"\r\n'
+    "Content-Transfer-Encoding: BASE64\r\n"
+    "\r\n"
+    + base64.encodebytes(BROTHER_TEXT.encode("latin-1")).decode("ascii").replace("\n", "\r\n")
+)
+
+
+class LogTextTests(unittest.TestCase):
+    def test_decodes_the_subject_and_a_base64_text_body(self):
+        self.assertEqual(
+            smtp_sink.log_text(BROTHER.encode("ascii")),
+            "Subject: E-mail Report(TXT)\n\n" + BROTHER_TEXT,
+        )
+
+    def test_decodes_an_encoded_subject_over_a_plain_body(self):
+        body = b"Subject: =?utf-8?B?VVBTIDE1wrBD?=\r\n\r\nplain\r\n"
+        self.assertEqual(smtp_sink.log_text(body), "Subject: UPS 15°C\n")
+
+    def test_a_subject_decoding_leaves_alone_gets_no_line(self):
+        for subject in (b"=?x-nonsense?B?YWJj?=", b"a =? that is no encoded word"):
+            with self.subTest(subject=subject):
+                self.assertIsNone(smtp_sink.log_text(b"Subject: " + subject + b"\r\n\r\nplain\r\n"))
+
+    def test_an_encoded_line_break_in_the_subject_stays_on_one_line(self):
+        # `=0D=0AFrom: x` decoded would otherwise start a line of its own.
+        body = b"Subject: =?utf-8?Q?a=0D=0AFrom:_x?=\r\n\r\nplain\r\n"
+        self.assertEqual(smtp_sink.log_text(body), "Subject: a\\r\\nFrom: x\n")
+
+    def test_decodes_a_quoted_printable_body(self):
+        body = (
+            b"Content-Type: text/plain; charset=utf-8\r\n"
+            b"Content-Transfer-Encoding: quoted-printable\r\n"
+            b"\r\n"
+            b"15=C2=B0C, soft=\r\nbreak\r\n"
+        )
+        self.assertEqual(smtp_sink.log_text(body), "15°C, softbreak\r\n")
+
+    def test_gives_nothing_for_a_body_sent_as_it_is(self):
+        for body in (
+            b"Subject: s\r\n\r\nplain\r\n",
+            b"Content-Transfer-Encoding: 7bit\r\n\r\nplain\r\n",
+            b"Content-Transfer-Encoding: 8bit\r\n\r\ncaf\xc3\xa9\r\n",
+        ):
+            with self.subTest(body=body):
+                self.assertIsNone(smtp_sink.log_text(body))
+
+    def test_takes_the_text_part_out_of_a_multipart(self):
+        self.assertEqual(smtp_sink.log_text(MULTIPART.encode("ascii")), "the readable part")
+
+    def test_gives_nothing_for_a_multipart_with_no_text_part(self):
+        body = (
+            'Content-Type: multipart/mixed; boundary="B"\n\n'
+            "--B\nContent-Type: application/octet-stream\nContent-Transfer-Encoding: base64\n\n"
+            + ATTACHMENT_BASE64 + "\n--B--\n"
+        )
+        self.assertIsNone(smtp_sink.log_text(body.encode("ascii")))
+
+    def test_gives_nothing_for_an_encoded_attachment_that_is_text(self):
+        """A text file attached is not what the sender wrote."""
+        body = (
+            "Content-Type: text/plain\r\n"
+            'Content-Disposition: attachment; filename="load.csv"\r\n'
+            "Content-Transfer-Encoding: base64\r\n\r\n"
+            + base64.b64encode(b"a,b\r\n").decode("ascii") + "\r\n"
+        )
+        self.assertIsNone(smtp_sink.log_text(body.encode("ascii")))
+
+    def test_gives_nothing_for_text_that_is_only_blank(self):
+        body = b"Content-Transfer-Encoding: base64\r\n\r\n" + base64.b64encode(b"\r\n \r\n")
+        self.assertIsNone(smtp_sink.log_text(body))
+
+    def test_a_message_that_cannot_be_read_gets_no_text(self):
+        with mock.patch.object(smtp_sink, "parse_message", side_effect=RecursionError("deep")):
+            self.assertIsNone(smtp_sink.log_text(BROTHER.encode("ascii")))
+
+    def test_does_not_parse_a_message_with_nothing_hidden(self):
+        with mock.patch.object(smtp_sink, "parse_message") as parse:
+            self.assertIsNone(smtp_sink.log_text(b"Subject: s\r\n\r\nplain\r\n"))
+        parse.assert_not_called()
+
 
 class EnvelopePathTests(unittest.TestCase):
     def test_takes_the_address_and_drops_the_parameters(self):
@@ -793,6 +897,19 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             b"caf\xe9 too warm\r\n"
             b".stuffed\r\n",
             raw,
+        )
+
+    async def test_a_base64_report_is_logged_whole_and_then_decoded(self):
+        reader, writer = await self.connect()
+        reply = await self.send_message(reader, writer, BROTHER.removesuffix("\r\n"))
+        self.assertTrue(reply[0].startswith("250"), reply)
+
+        raw = self.log.read_bytes()
+        message, ruler, after = raw.partition(smtp_sink.DECODED_RULER.encode("ascii") + b"\n")
+        self.assertIn(BROTHER.encode("ascii"), message)
+        self.assertTrue(ruler, raw)
+        self.assertEqual(
+            after, b"Subject: E-mail Report(TXT)\n\n" + BROTHER_TEXT.encode("utf-8") + b"\n"
         )
 
     async def test_a_bare_line_feed_reaches_the_log_as_it_came(self):

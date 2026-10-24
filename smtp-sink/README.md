@@ -2,8 +2,9 @@
 
 An SMTP server for a LAN that accepts mail and never delivers it. It takes any
 message from any sender to any recipient, appends the raw message with a short
-envelope header to a log file, and optionally forwards a summary to a syslog
-server and the whole message, as JSON, to a webhook. It never relays, never
+envelope header to a log file, with its subject and text decoded below it when
+they were sent encoded, and optionally forwards a summary to a syslog server
+and the whole message, as JSON, to a webhook. It never relays, never
 authenticates, and keeps no mailboxes.
 
 The use it was written for is a device that can only report by sending mail: a
@@ -63,14 +64,42 @@ Without `--syslog` or `--webhook-url` nothing is forwarded and the log file is
 the only record.
 
 That file gets every message byte for byte as it arrived, whole, whatever the
-syslog line was trimmed down to. Nothing in it is decoded and written back
-out, so a device sending 8-bit text in some encoding of its own keeps its
-bytes intact rather than having them replaced. One consequence worth knowing
-before you point a tool at the file: the envelope lines the sink adds end in
-LF and the messages between them keep the line endings they arrived with,
-CRLF or a bare LF, so the endings are mixed by design. A message that cannot
-be written to the file, because the disk is full or the file cannot be
-opened, draws a 451 so the client knows to try again.
+syslog line was trimmed down to. The message itself is never decoded and
+written back out, so a device sending 8-bit text in some encoding of its own
+keeps its bytes intact rather than having them replaced; text that is decoded,
+described below, goes after the message, not in place of it. One consequence
+worth knowing before you point a tool at the file: the envelope lines the sink
+adds end in LF and the messages between them keep the line endings they
+arrived with, CRLF or a bare LF, so the endings are mixed by design. A message
+that cannot be written to the file, because the disk is full or the file
+cannot be opened, draws a 451 so the client knows to try again.
+
+Plenty of devices send a plain report base64 encoded, Brother printers among
+them, which leaves the message in the file as a block nobody can read. So
+when the first text/plain part that is not an attachment was sent base64,
+quoted-printable or uuencoded, or sits inside a multipart message among its
+boundaries and attachments, its text is decoded as the webhook's
+`message.text` is, from its charset into UTF-8, and written after the
+message, below a line of its own. A subject holding RFC 2047 encoded words
+that decoding changes goes first, as a `Subject:` line, with control
+characters written out as escapes as in the envelope lines, and a blank line
+before the text:
+
+```
+~~~ decoded text ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Subject: E-mail Report(TXT)
+
+<Network Information>
+URL: http://192.168.2.20/general/status.html
+```
+
+That is an addition, never a replacement: the message above it is still
+exactly as it arrived. The text keeps the line endings it decoded to. A
+message with an encoded subject and a plain body gets the `Subject:` line
+alone. One with neither gets nothing more, since it reads well enough
+already, and so does one that cannot be read. The decoding happens before the
+client's 250, and like the parse for syslog it is CPU time bounded by the
+size limit.
 
 The envelope records the address on its own. A client sends `MAIL
 FROM:<a@b.test> SIZE=1234` once the server advertises `SIZE`, which it does,
