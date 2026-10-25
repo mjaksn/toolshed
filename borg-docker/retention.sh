@@ -91,6 +91,12 @@ setting REPO_NAME containers
 [ "$(id -u)" -eq 0 ] || die "Run as root."
 [ -n "$RETENTION_PASSDIR" ] || die "Set RETENTION_PASSDIR to the directory holding <client>.pass files."
 [ -d "$RETENTION_PASSDIR" ] || die "RETENTION_PASSDIR '$RETENTION_PASSDIR' does not exist."
+
+# One run at a time. Two would share the saved key list and the records, and
+# could each put back a list the other had changed.
+command -v flock >/dev/null || die "flock is needed, from util-linux."
+exec 9>"${RETENTION_PASSDIR}/.retention.lock"
+flock -n 9 || die "Another retention.sh is running against ${RETENTION_PASSDIR}; try again when it has finished."
 container="$BORGSERVER_CONTAINER"
 
 if ! docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -q true; then

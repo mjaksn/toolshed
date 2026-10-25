@@ -432,7 +432,9 @@ For each client it prunes the archives named `<client>-*` by
 check --repository-only`, and reports the size on disk. It finds the
 repositories through the container's `/backup` mount, skips any that is
 locked because a backup is running, does not compact after a prune that
-failed, and exits non-zero if any step failed for any client.
+failed, and exits non-zero if any step failed for any client. Only one run
+at a time is allowed, through a lock on `.retention.lock` in
+`RETENTION_PASSDIR`, which needs `flock` from util-linux on the server.
 
 ### Archives that disappear
 
