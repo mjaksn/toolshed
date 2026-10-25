@@ -79,9 +79,12 @@ again in an `EXIT` trap, so they come back even if borg fails.
   the repository, protected by a passphrase only the client and you hold. The
   server never sees plaintext.
 - **Append-only.** The server runs `borg serve --append-only` for every
-  client key. A compromised client, or ransomware on one, can add archives
-  but cannot delete or overwrite history. Deletion happens only on the
-  server, with direct access to the files; see [Retention](#retention).
+  client key. A compromised client, or ransomware on one, can add archives,
+  and can remove archives from the list a repository shows, but cannot
+  remove the data itself: that stays on disk until the server compacts the
+  repository. `retention.sh` refuses to compact a repository that has lost
+  archives it did not prune itself, so they stay recoverable until someone
+  has looked; see [Retention](#retention).
 - **Stock tooling.** One apt package on the client and one container on the
   server.
 
@@ -89,7 +92,7 @@ again in an `EXIT` trap, so they come back even if borg fails.
 
 | Who | Can do |
 | --- | --- |
-| A client's key | Create archives in its own repository, and read it. Nothing else. |
+| A client's key | Create archives in its own repository, and read it. It can also drop archives from the repository's list, but their data stays on disk, and `retention.sh` notices and stops before compacting it away. Nothing else. |
 | Root on the server | Everything, through `docker exec` into the container: prune, compact, check, delete. Reading what is inside an archive also needs that client's passphrase. |
 | Anyone with the backup files but no passphrase | Sees encrypted chunks only. |
 
@@ -401,15 +404,43 @@ sudo ./retention.sh [--env FILE] [--dry-run]
 | Option | Meaning |
 | --- | --- |
 | `--env FILE` | read settings from FILE instead of `borg-docker.env` beside the script |
-| `--dry-run` | list what prune would delete, delete nothing, and skip compacting |
+| `--dry-run` | list what prune would delete, delete nothing, skip compacting, and leave the record of archives as it is |
 | `-h`, `--help` | print the usage |
 
 For each client it prunes the archives named `<client>-*` by
 `RETENTION_KEEP`, compacts the repository to free the space, runs `borg
 check --repository-only`, and reports the size on disk. It finds the
 repositories through the container's `/backup` mount, skips any that is
-locked because a backup is running, and exits non-zero if any step failed
-for any client.
+locked because a backup is running, does not compact after a prune that
+failed, and exits non-zero if any step failed for any client.
+
+### Archives that disappear
+
+Append-only stops a client deleting data, not deleting archives from the
+repository's list of them. A client that runs `borg delete` or `borg prune`
+removes the archives from that list, while the data they held stays on disk
+until the repository is compacted, and compacting is what `retention.sh`
+does. So each run records every client's archives in
+`<client>.archives`, beside its passphrase file, and the next run compares.
+An archive that has gone since then, and that the script did not prune
+itself, means a client deleted it, and that client is reported and skipped
+entirely: no prune and no compact, until someone has looked. The run exits
+non-zero, so a schedule shows it.
+
+If the deletion was yours, remove `<client>.archives` and run again. If it
+was not, stop that client's timer and roll the repository back to before
+the deletion, following the append-only section of Borg's documentation for
+`borg serve`, which explains how to use the repository's `transactions` log
+to do it.
+
+The first run for each client has no record to compare with, and says so.
+A dry run compares and reports but never writes the record.
+
+What this does not catch is a client that adds archives rather than
+removing them. Archives created with a false `--timestamp` could push real
+ones outside the keep rules, and prune would then remove them as it should.
+Read the prune list now and then, and look twice at a run that prunes more
+than it usually does.
 
 ### Passphrases
 

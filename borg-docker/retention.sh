@@ -12,6 +12,9 @@
 #
 # A client is pruned only when RETENTION_PASSDIR holds <client>.pass with its
 # repository passphrase; a repository without one is reported and left alone.
+# Each run records the client's archives beside it, in <client>.archives, and
+# a client with an archive gone since then that this script did not prune is
+# reported and left alone too, since compacting would make the loss final.
 # Each setting is taken from the environment, else the settings file (--env
 # FILE, else borg-docker.env beside this script), else the default.
 #
@@ -99,6 +102,16 @@ fi
 
 rc=0
 
+# Borg inside the container with the current client's passphrase, which
+# reaches it through docker's own environment, so it never appears on a
+# command line in the process list.
+borg_in() {
+    BORG_PASSPHRASE="$pass" docker exec -u borg \
+        -e BORG_PASSPHRASE \
+        -e BORG_RELOCATED_REPO_ACCESS_IS_OK=yes \
+        "$container" borg "$@"
+}
+
 # Repositories nobody will prune, said once so they are not forgotten.
 for dir in "$repo_base"/*/; do
     client="$(basename "$dir")"
@@ -128,16 +141,49 @@ for passfile in "${passfiles[@]}"; do
         continue
     fi
 
-    # The passphrase reaches borg through docker's own environment, so it
-    # never appears on a command line in the process list.
-    BORG_PASSPHRASE="$(cat "$passfile")" docker exec -u borg \
-        -e BORG_PASSPHRASE \
-        -e BORG_RELOCATED_REPO_ACCESS_IS_OK=yes \
-        "$container" borg prune "${prune_args[@]}" "${keep_args[@]}" \
-        --glob-archives "${client}-*" "$repo" || rc=1
+    pass="$(cat "$passfile")"
+    record="${RETENTION_PASSDIR}/${client}.archives"
+    if ! now="$(borg_in list --short "$repo")"; then
+        echo "   could not list the archives; skipping this run"
+        rc=1
+        continue
+    fi
+
+    # Append-only lets a client remove archives from the manifest but never
+    # from the disk, and compacting is what would make that permanent. So an
+    # archive that has gone since the last run, without this script pruning
+    # it, stops everything for this client until someone has looked.
+    if [ -f "$record" ]; then
+        gone="$(comm -23 <(LC_ALL=C sort "$record") <(LC_ALL=C sort <<<"$now"))"
+        if [ -n "$gone" ]; then
+            echo "   archives gone since the last run, which this script did not prune:"
+            sed 's/^/     /' <<<"$gone"
+            echo "   A client may have deleted them. Nothing is pruned or compacted, so"
+            echo "   they can still be recovered; see Retention in the README. If you"
+            echo "   deleted them yourself, remove ${record} and run again."
+            rc=1
+            continue
+        fi
+    else
+        echo "   no record of its archives yet; this run starts one"
+    fi
+
+    prune_ok=1
+    borg_in prune "${prune_args[@]}" "${keep_args[@]}" \
+        --glob-archives "${client}-*" "$repo" || { prune_ok=0; rc=1; }
 
     if [ "$dry_run" -eq 0 ]; then
-        docker exec -u borg "$container" borg compact "$repo" || rc=1
+        if [ "$prune_ok" -eq 1 ]; then
+            docker exec -u borg "$container" borg compact "$repo" || rc=1
+        else
+            echo "   prune failed, so nothing is compacted"
+        fi
+        if now="$(borg_in list --short "$repo")"; then
+            (umask 077; printf '%s\n' "$now" > "$record")
+        else
+            echo "   could not list the archives after pruning; the record is unchanged"
+            rc=1
+        fi
     fi
 
     docker exec -u borg "$container" borg check --repository-only "$repo" || rc=1

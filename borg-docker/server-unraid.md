@@ -146,6 +146,8 @@ chmod 600 /mnt/user/borg/.retention/*.pass
 ```
 
 with `RETENTION_PASSDIR="/mnt/user/borg/.retention"` in `borg-docker.env`.
+`retention.sh` keeps its record of each client's archives there too, as
+`<client>.archives`, which is how it notices archives a client has deleted.
 
 Schedule it with the User Scripts plugin, from Community Applications: Add
 New Script, name it `borg-retention`, and give it this body:
