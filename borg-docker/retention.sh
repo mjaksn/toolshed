@@ -174,6 +174,20 @@ resume_client() {
 suspend_client() {
     local line n
     [ "$dry_run" -eq 0 ] || return 0
+    # The saved copy is the only way back for a client that is out, so
+    # nothing may overwrite it: not the next client after a key that would
+    # not go back, and not this run after one that was interrupted.
+    if [ -n "$suspended" ]; then
+        echo "   ${suspended}'s key could not be put back, so no other client is touched this run"
+        rc=1
+        return 1
+    fi
+    if docker exec "$container" test -e "${keys}.retention"; then
+        echo "   ${keys}.retention is left from an interrupted run; skipping."
+        echo "   Restart ${container}, which rebuilds ${keys}, then delete that file."
+        rc=1
+        return 1
+    fi
     line="command=\"cd /backup/${client};"
     n="$(docker exec "$container" grep -c -F "$line" "$keys" 2>/dev/null)" || n=0
     if [ "$n" != 1 ]; then
