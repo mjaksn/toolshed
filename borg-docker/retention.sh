@@ -90,10 +90,16 @@ setting() {
 setting BORGSERVER_CONTAINER borgserver
 setting RETENTION_PASSDIR ""
 setting RETENTION_KEEP "--keep-daily 14 --keep-weekly 8 --keep-monthly 6"
+setting RETENTION_VERIFY data
 setting REPO_NAME containers
 
 [ "$(id -u)" -eq 0 ] || die "Run as root."
 [ -n "$RETENTION_PASSDIR" ] || die "Set RETENTION_PASSDIR to the directory holding <client>.pass files."
+case "$RETENTION_VERIFY" in
+    data) verify_args=(--verify-data) ;;
+    archives) verify_args=(--archives-only) ;;
+    *) die "RETENTION_VERIFY '$RETENTION_VERIFY' is not data or archives." ;;
+esac
 [ -d "$RETENTION_PASSDIR" ] || die "RETENTION_PASSDIR '$RETENTION_PASSDIR' does not exist."
 
 # One run at a time. Two would share the saved key list and the records, and
@@ -355,6 +361,23 @@ for passfile in "${passfiles[@]}"; do
             echo "   recorded $(grep -c . <<<"$now") archives"
         fi
         continue
+    fi
+
+    # A client can also delete or overwrite single chunks while every
+    # archive keeps its ID, which nothing above would notice and compacting
+    # would make final. So before anything is pruned, while the client is
+    # still shut out, borg checks every archive against its chunks: reading
+    # each one back and checking it against its ID with RETENTION_VERIFY at
+    # data, or only that each one is there with it at archives.
+    if [ "$dry_run" -eq 0 ]; then
+        echo "   checking every archive's chunks (${RETENTION_VERIFY})"
+        if ! borg_in check "${verify_args[@]}" "$repo"; then
+            echo "   the check failed, so nothing is pruned or compacted and the record is unchanged."
+            echo "   Stop this client's timer and look at the repository; see Retention in the README."
+            rc=1
+            resume_client || rc=1
+            continue
+        fi
     fi
 
     prune_ok=1

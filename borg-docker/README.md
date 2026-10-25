@@ -223,6 +223,7 @@ without the third.
 | `BORGSERVER_CONTAINER` | `borgserver` | The container's name. `setup.sh` only prints it; `retention.sh` runs borg inside it. |
 | `RETENTION_PASSDIR` | none, required | `retention.sh` only: the directory of `<client>.pass` files |
 | `RETENTION_KEEP` | `--keep-daily 14 --keep-weekly 8 --keep-monthly 6` | `retention.sh` only: the prune rules |
+| `RETENTION_VERIFY` | `data` | `retention.sh` only: how each archive is checked before pruning, `data` reading every chunk back or `archives` checking only that each is there |
 
 The per host settings, `CLIENT_NAME` and everything from `PROJECTS_DIR` to
 `LARGE_VOLUME_MB`, are remembered on each host after its first run, so they
@@ -437,9 +438,14 @@ sudo ./retention.sh [--env FILE] [--dry-run] [--record]
 | `--record` | only check each client's archives against its record and bring the record up to date; prune, compact and shut out nothing |
 | `-h`, `--help` | print the usage |
 
-For each client it prunes the archives named `<client>-*` by
-`RETENTION_KEEP`, compacts the repository to free the space, runs `borg
-check --repository-only`, and reports the size on disk. It finds the
+For each client it first checks every archive against its chunks, with
+`borg check --verify-data`, and touches nothing more if that fails. Then it
+prunes the archives named `<client>-*` by `RETENTION_KEEP`, compacts the
+repository to free the space, runs `borg check --repository-only`, and
+reports the size on disk. The data check reads the whole repository, which
+takes minutes for a few gigabytes; for one too large to read through every
+week, `RETENTION_VERIFY="archives"` checks only that every chunk an archive
+needs is there, which catches a deleted chunk but not an overwritten one. It finds the
 repositories through the container's `/backup` mount, skips any that is
 locked because a backup is running, does not compact after a prune that
 failed, and exits non-zero if any step failed for any client. Only one run
@@ -458,7 +464,10 @@ compares. An archive deleted and then made again under the same name has a
 new ID, so it counts as gone. Borg allows a line break in an archive name,
 which could make one archive's line pass for another's, so the IDs are also
 listed on their own and must match the named listing exactly; if they do
-not, the client is reported and nothing is pruned or compacted for it.
+not, the client is reported and nothing is pruned or compacted for it. A
+client can also delete or overwrite single chunks while every archive keeps
+its ID, which no list of archives shows, and that is what the data check
+before pruning is for.
 An archive that has gone since then, and that the script did not prune
 itself, means a client deleted it, and that client is reported and skipped
 entirely: no prune and no compact, until someone has looked. The run exits
@@ -560,12 +569,12 @@ message; nothing needs doing.
 
 ### A deeper check
 
-`--repository-only` checks the segments. Once a month or so, check a
-repository fully, which also checks every archive and needs the passphrase:
+Each weekly run already checks every archive's data before pruning. To
+check a repository by hand between runs, the same check is:
 
 ```
 BORG_PASSPHRASE="$(cat /srv/borg/.retention/<client>.pass)" \
-    docker exec -u borg -e BORG_PASSPHRASE borgserver borg check /backup/<client>/containers
+    docker exec -u borg -e BORG_PASSPHRASE borgserver borg check --verify-data /backup/<client>/containers
 ```
 
 Never schedule `--repair`. If a check fails, stop that client's timer, copy
