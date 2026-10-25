@@ -396,10 +396,13 @@ Excludes are paths, read as Borg's `fm:` patterns, and one that matches
 nothing is harmless. A path in `EXTRA_DIRS` must exist, as above. A path to
 back up that is a symlink is followed, since borg would otherwise store the
 link and not what it points to, and the archive holds it under the target's
-path. An exclude written under the link's path is moved to the target's
-when the backup runs, so either path works; only that leading path changes,
-so a pattern keeps its meaning. The volumes directory is resolved the same
-way when `setup.sh` runs, for a Docker root that is a link to another disk.
+path. Excludes are resolved the same way when the backup runs: in each one
+that starts with `/`, the leading part holding no pattern character has
+its symlinks resolved, and any pattern after it is kept as written. So an
+exclude can name either the link's path or the target's, however links
+nest; one with a style prefix, such as `re:`, is left as it is. The
+volumes directory is resolved too when `setup.sh` runs, for a Docker root
+that is a link to another disk.
 
 To move a host to another server or repository, change the settings and run
 `setup.sh` again rather than editing `BORG_REPO` by hand, since the SSH

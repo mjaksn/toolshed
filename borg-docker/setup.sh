@@ -196,7 +196,6 @@ VOLUMES_DIR="${VOLUMES_DIR%/}"
 [ -d "$VOLUMES_DIR" ] || die "Volumes directory '$VOLUMES_DIR' does not exist. Set VOLUMES_DIR."
 # Docker's root is sometimes a symlink to another disk. The backup reads the
 # real directory, so the volumes are found, and excluded, by that path.
-linked_volumes="$VOLUMES_DIR"
 VOLUMES_DIR="$(readlink -f "$VOLUMES_DIR")"
 
 setting PROJECTS_DIR ""
@@ -224,16 +223,6 @@ fi
 setting EXTRA_DIRS ""
 setting SKIP_DIRS ""
 setting BORG_EXCLUDES "${VOLUMES_DIR}/backingFsBlockDev"
-# Excludes saved under the volumes directory's linked path move to its real
-# one. Only that leading path changes, so a pattern keeps its meaning.
-if [ "$linked_volumes" != "$VOLUMES_DIR" ]; then
-    moved=""
-    for x in $BORG_EXCLUDES; do
-        case "$x" in "$linked_volumes"|"$linked_volumes"/*) x="${VOLUMES_DIR}${x#"$linked_volumes"}" ;; esac
-        moved="${moved:+$moved }$x"
-    done
-    BORG_EXCLUDES="$moved"
-fi
 setting KEPT_VOLUMES ""
 setting LARGE_VOLUME_MB 1024
 [[ "$LARGE_VOLUME_MB" =~ ^[0-9]+$ ]] || die "LARGE_VOLUME_MB '$LARGE_VOLUME_MB' is not a whole number of megabytes."
@@ -345,7 +334,10 @@ volume_decided() {
     for x in $KEPT_VOLUMES; do
         if [ "$x" = "$1" ]; then return 0; fi
     done
+    # Excludes are compared by where they really lead, as the backup reads
+    # them, so one written under a linked path to the volumes still counts.
     for x in $BORG_EXCLUDES; do
+        case "$x" in /*) x="$(readlink -m "$x")" ;; esac
         case "$x" in "${VOLUMES_DIR}/$1"|"${VOLUMES_DIR}/$1"/*) return 0 ;; esac
     done
     return 1
