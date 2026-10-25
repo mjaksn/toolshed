@@ -652,6 +652,29 @@ fi
 # stays an empty string.
 running="${running//$'\n'/ }"
 
+# A container started with --rm is removed by docker stop, with its
+# anonymous volumes, and could not be started again. Those are left running
+# and named instead; their own data is backed up live.
+left_running=""
+if [ -n "$running" ]; then
+    # shellcheck disable=SC2086
+    if ! info="$(docker inspect -f '{{.Id}} {{.HostConfig.AutoRemove}} {{.Name}}' $running)"; then
+        echo "ERROR: could not inspect the running containers; nothing was stopped or backed up." >&2
+        exit 2
+    fi
+    running=""
+    while read -r id autoremove name; do
+        if [ "$autoremove" = true ]; then
+            left_running="${left_running:+$left_running }${name#/}"
+        else
+            running="${running:+$running }$id"
+        fi
+    done <<<"$info"
+fi
+if [ -n "$left_running" ]; then
+    echo "Left running, because stopping a container started with --rm removes it: ${left_running}" >&2
+fi
+
 # Runs on every exit. A container that will not start again fails the run,
 # with Docker's own error in the journal, unless the run had failed already.
 restart_containers() {
