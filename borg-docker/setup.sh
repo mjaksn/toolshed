@@ -587,7 +587,9 @@ if ! running="$(docker ps -q)"; then
     echo "ERROR: could not list the running containers; nothing was stopped or backed up." >&2
     exit 2
 fi
-running="$(tr '\n' ' ' <<<"$running")"
+# One line per container becomes one space-separated list, and no containers
+# stays an empty string.
+running="${running//$'\n'/ }"
 
 # Runs on every exit. A container that will not start again fails the run,
 # with Docker's own error in the journal, unless the run had failed already.
