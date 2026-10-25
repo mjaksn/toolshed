@@ -174,7 +174,10 @@ suspended=""
 
 resume_client() {
     [ -n "$suspended" ] || return 0
-    if docker exec "$container" sh -c 'cat "$1.retention" > "$1" && rm -f "$1.retention"' _ "$keys"; then
+    # Copied beside the live file and moved over it, so the live file is
+    # never half written, and the saved copy is kept until the move is done.
+    if docker exec "$container" sh -c \
+        'cp -p "$1.retention" "$1.restore" && mv -f "$1.restore" "$1" && rm -f "$1.retention"' _ "$keys"; then
         suspended=""
         return 0
     fi
