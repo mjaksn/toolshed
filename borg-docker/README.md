@@ -424,8 +424,10 @@ Append-only stops a client deleting data, not deleting archives from the
 repository's list of them. A client that runs `borg delete` or `borg prune`
 removes the archives from that list, while the data they held stays on disk
 until the repository is compacted, and compacting is what `retention.sh`
-does. So each run records every client's archives in
-`<client>.archives`, beside its passphrase file, and the next run compares.
+does. So each run records every client's archives, by ID as well as name,
+in `<client>.archives` beside its passphrase file, and the next run
+compares. An archive deleted and then made again under the same name has a
+new ID, so it counts as gone.
 An archive that has gone since then, and that the script did not prune
 itself, means a client deleted it, and that client is reported and skipped
 entirely: no prune and no compact, until someone has looked. The run exits

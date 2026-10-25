@@ -12,9 +12,10 @@
 #
 # A client is pruned only when RETENTION_PASSDIR holds <client>.pass with its
 # repository passphrase; a repository without one is reported and left alone.
-# Each run records the client's archives beside it, in <client>.archives, and
-# a client with an archive gone since then that this script did not prune is
-# reported and left alone too, since compacting would make the loss final.
+# Each run records the client's archives, by ID and name, beside it in
+# <client>.archives, and a client with an archive gone since then that this
+# script did not prune is reported and left alone too, since compacting would
+# make the loss final.
 # Each setting is taken from the environment, else the settings file (--env
 # FILE, else borg-docker.env beside this script), else the default.
 #
@@ -112,6 +113,13 @@ borg_in() {
         "$container" borg "$@"
 }
 
+# The current client's archives, one per line as its ID and then its name.
+# The ID is what the record compares: a client can delete an archive and
+# create another under the same name, but not with the same ID.
+archives() {
+    borg_in list --format '{id} {archive}{NL}' "$repo"
+}
+
 # Repositories nobody will prune, said once so they are not forgotten.
 for dir in "$repo_base"/*/; do
     client="$(basename "$dir")"
@@ -143,7 +151,7 @@ for passfile in "${passfiles[@]}"; do
 
     pass="$(cat "$passfile")"
     record="${RETENTION_PASSDIR}/${client}.archives"
-    if ! now="$(borg_in list --short "$repo")"; then
+    if ! now="$(archives)"; then
         echo "   could not list the archives; skipping this run"
         rc=1
         continue
@@ -178,7 +186,7 @@ for passfile in "${passfiles[@]}"; do
         else
             echo "   prune failed, so nothing is compacted"
         fi
-        if now="$(borg_in list --short "$repo")"; then
+        if now="$(archives)"; then
             (umask 077; printf '%s\n' "$now" > "$record")
         else
             echo "   could not list the archives after pruning; the record is unchanged"
