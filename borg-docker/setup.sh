@@ -255,11 +255,21 @@ done
 SKIP_DIRS="$kept"
 
 # True when the path is already backed up, or was declined before.
+# Paths are compared as their real paths, with every symlink on the way
+# resolved, because that is what the backup reads. Borg does not follow a
+# symlink inside a directory it backs up, so /opt/projects/app/data is not
+# covered by /opt/projects when app is a link to somewhere else.
+canon() {
+    readlink -f "$1" 2>/dev/null || printf '%s' "$1"
+}
+
 covered() {
-    local r
+    local r c rc
+    c="$(canon "$1")"
     # shellcheck disable=SC2086
     for r in $PROJECTS_DIR "$VOLUMES_DIR" $EXTRA_DIRS $SKIP_DIRS; do
-        case "$1" in "$r"|"$r"/*) return 0 ;; esac
+        rc="$(canon "$r")"
+        case "$c" in "$rc"|"$rc"/*) return 0 ;; esac
     done
     return 1
 }
@@ -367,19 +377,24 @@ done
 
 # Saying yes to a directory can cover one chosen earlier, such as a compose
 # project holding a data directory already listed. Keep only the outermost,
-# so that nothing is given to borg twice.
+# so that nothing is given to borg twice. Real paths are compared, as above,
+# so two paths to the same place count as one.
 kept=""
+kept_real=""
 for d in $EXTRA_DIRS; do
     outer=""
+    dc="$(canon "$d")"
     # shellcheck disable=SC2086
     for e in $PROJECTS_DIR "$VOLUMES_DIR" $EXTRA_DIRS; do
-        case "$d" in "$e"/*) outer="$e" ;; esac
+        ec="$(canon "$e")"
+        case "$dc" in "$ec"/*) outer="$e" ;; esac
     done
-    case " $kept " in *" $d "*) continue ;; esac
+    case " $kept_real " in *" $dc "*) continue ;; esac
     if [ -n "$outer" ]; then
         echo "Dropping ${d} from the extra directories: ${outer} already covers it."
     else
         kept="${kept:+$kept }$d"
+        kept_real="${kept_real:+$kept_real }$dc"
     fi
 done
 EXTRA_DIRS="$kept"

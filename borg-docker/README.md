@@ -272,7 +272,10 @@ one you say no to joins `SKIP_DIRS` and is not asked about again. A
 previously chosen path that no longer exists is dropped with a warning, and
 one that another backed-up path now contains, such as a data directory
 inside a compose project you have just said yes to, is dropped with a note,
-so that nothing is given to borg twice.
+so that nothing is given to borg twice. Paths are compared by where they
+really lead, with symlinks resolved, since borg does not follow a symlink
+inside a directory it backs up: data under a linked directory is offered
+on its own rather than counted as covered.
 
 Named volumes are backed up without a question, being under the volumes
 directory, so it then asks about each volume larger than
