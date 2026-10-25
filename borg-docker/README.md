@@ -449,7 +449,10 @@ until the repository is compacted, and compacting is what `retention.sh`
 does. So each run records every client's archives, by ID as well as name,
 in `<client>.archives` beside its passphrase file, and the next run
 compares. An archive deleted and then made again under the same name has a
-new ID, so it counts as gone.
+new ID, so it counts as gone. Borg allows a line break in an archive name,
+which could make one archive's line pass for another's, so the IDs are also
+listed on their own and must match the named listing exactly; if they do
+not, the client is reported and nothing is pruned or compacted for it.
 An archive that has gone since then, and that the script did not prune
 itself, means a client deleted it, and that client is reported and skipped
 entirely: no prune and no compact, until someone has looked. The run exits

@@ -138,13 +138,38 @@ borg_in() {
 # The current client's archives, one per line as its ID and then its name.
 # The ID is what the record compares: a client can delete an archive and
 # create another under the same name, but not with the same ID.
+#
+# Borg allows a line break in an archive name, and a name holding one could
+# print a line that passes for another archive. So the IDs are also listed
+# on their own, where no name can reach, and if the two listings do not
+# carry exactly the same IDs, nothing is trusted for this client. No client
+# of this tool names an archive that way, so normally they always agree.
 archives() {
-    borg_in list --format '{id} {archive}{NL}' "$repo"
+    local listed named
+    listed="$(borg_in list --format '{id}{NL}' "$repo")" || return 1
+    named="$(borg_in list --format '{id} {archive}{NL}' "$repo")" || return 1
+    if [ "$(ids <<<"$listed")" != "$(ids <<<"$named")" ] \
+        || ids <<<"$listed" | grep -q -v -x '[0-9a-f]\{64\}'; then
+        echo "   its two listings of archives disagree: an archive name holding a line" >&2
+        echo "   break, or an archive added between them. Nothing is pruned or compacted." >&2
+        return 2
+    fi
+    printf '%s\n' "$named"
 }
 
 # The IDs alone, from such a list on stdin, sorted for comm.
 ids() {
     cut -d' ' -f1 | sed '/^$/d' | LC_ALL=C sort
+}
+
+# The lines of such a list on stdin whose ID is, or is not, one of the IDs
+# given. They match on the ID field alone, since a name may hold any text,
+# another archive's ID included.
+with_ids() {
+    awk 'NR == FNR { if (NF) want[$1]; next } $1 in want' <(printf '%s\n' "$1") -
+}
+without_ids() {
+    awk 'NR == FNR { if (NF) drop[$1]; next } NF && !($1 in drop)' <(printf '%s\n' "$1") -
 }
 
 # Replace the current client's record with the given list. It is written
@@ -306,10 +331,10 @@ for passfile in "${passfiles[@]}"; do
     # archive that has gone since the last run, without this script pruning
     # it, stops everything for this client until someone has looked.
     if [ -f "$record" ]; then
-        gone="$(comm -23 <(LC_ALL=C sort "$record") <(LC_ALL=C sort <<<"$now"))"
+        gone="$(comm -23 <(ids < "$record") <(ids <<<"$now"))"
         if [ -n "$gone" ]; then
             echo "   archives gone since the last run, which this script did not prune:"
-            sed 's/^/     /' <<<"$gone"
+            awk 'NR == FNR { g[$1]; next } $1 in g' <(printf '%s\n' "$gone") "$record" | sed 's/^/     /'
             echo "   A client may have deleted them. Nothing is pruned or compacted, so"
             echo "   they can still be recovered; see Retention in the README. If you"
             echo "   deleted them yourself, remove ${record} and run again."
@@ -343,7 +368,9 @@ for passfile in "${passfiles[@]}"; do
     # it, and again after, in case shutting the client out ever fails to
     # hold.
     if [ "$dry_run" -eq 0 ]; then
-        pruned="$(grep '^Pruning archive' <<<"$prune_out" | grep -o '\[[0-9a-f]\{64\}\]' | tr -d '[]' | LC_ALL=C sort || true)"
+        # Only the ID that ends the line is borg's own: anything bracketed
+        # earlier on it is part of an archive name.
+        pruned="$(sed -n 's/^Pruning archive (.*\[\([0-9a-f]\{64\}\)\]$/\1/p' <<<"$prune_out" | LC_ALL=C sort)"
         if ! after="$(archives)"; then
             echo "   could not list the archives after pruning; nothing is compacted and the record is unchanged"
             rc=1
@@ -351,14 +378,14 @@ for passfile in "${passfiles[@]}"; do
             unexpected="$(comm -23 <(ids <<<"$now") <(ids <<<"$after") | comm -23 - <(printf '%s\n' "$pruned"))"
             if [ -n "$unexpected" ]; then
                 echo "   archives gone during this run that prune did not remove:"
-                grep -F -f <(printf '%s\n' "$unexpected") <<<"$now" | sed 's/^/     /'
+                with_ids "$unexpected" <<<"$now" | sed 's/^/     /'
                 echo "   A client may have deleted them. Nothing is compacted, and the record"
                 echo "   still lists them, so the next run reports them too."
                 # Recorded as before, less what prune did report, so that the
                 # next run names only these.
                 keep="$now"
                 if [ -n "$pruned" ]; then
-                    keep="$(grep -v -F -f <(printf '%s\n' "$pruned") <<<"$now" || true)"
+                    keep="$(without_ids "$pruned" <<<"$now")"
                 fi
                 save_record "$keep" || rc=1
                 rc=1
@@ -373,7 +400,7 @@ for passfile in "${passfiles[@]}"; do
                     rc=1
                 elif lost="$(comm -23 <(ids <<<"$after") <(ids <<<"$final"))"; [ -n "$lost" ]; then
                     echo "   archives gone just before compacting, whose data may now be lost:"
-                    grep -F -f <(printf '%s\n' "$lost") <<<"$after" | sed 's/^/     /'
+                    with_ids "$lost" <<<"$after" | sed 's/^/     /'
                     echo "   The record still lists them, so the next run reports them too."
                     save_record "$after" || rc=1
                     rc=1
