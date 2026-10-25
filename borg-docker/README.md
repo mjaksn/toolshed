@@ -646,11 +646,15 @@ on Debian; if it complains, that package is what is missing.
    one. Say **no** to the backup at the end, and pause the timer with `sudo
    systemctl disable --now borg-backup.timer`, because nothing it found to
    back up exists yet.
-3. Stop every container and extract the latest archive over `/`:
+3. Stop Docker itself, not only its containers, and extract the latest
+   archive over `/`. The archive holds Docker's `volumes/metadata.db`, which
+   the daemon keeps open while it runs, so it must not be running while that
+   file is replaced:
    ```
-   docker stop $(docker ps -q)
+   sudo systemctl stop docker.socket docker.service
    cd /
    bb extract --list ::<latest archive>
+   sudo systemctl start docker.socket docker.service
    ```
 4. Bring each project up, or let whatever manages them do it, and check
    them.
