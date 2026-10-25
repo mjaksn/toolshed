@@ -196,10 +196,11 @@ the shared-library mistake wearing different clothes.
 
 - **Line endings are set per language, not per repository.** `.gitattributes`
   gives PowerShell and batch files CRLF, holds the LF-native languages at LF,
-  currently shell, Python, C, JavaScript, JSON and Markdown, and leaves
-  everything else to `text=auto`, which stores LF and checks out whatever the
-  platform uses, so those files are CRLF in a Windows working copy and git says
-  so on the first `git add`. That list is a summary and the file is the
+  currently shell, Python, C, JavaScript, JSON and Markdown, along with the
+  `.env.example` settings templates that bash sources, and leaves everything
+  else to `text=auto`, which stores LF and checks out whatever the platform
+  uses, so those files are CRLF in a Windows working copy and git says so on
+  the first `git add`. That list is a summary and the file is the
   authority: a language added there without this line being updated makes this
   sentence wrong. PowerShell on Windows is the common case for the tools here,
   and some hosts are fussy about the shebang line in a shell script that arrived

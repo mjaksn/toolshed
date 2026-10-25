@@ -35,3 +35,8 @@ desktop.ini
 # Code looks for, which is per-user scaffolding rather than part of the
 # project, so it stays out of the repository.
 CLAUDE.md
+
+# borg-docker reads its settings from a borg-docker.env beside its scripts,
+# and that file holds someone's own server address and paths. The template
+# that is committed is borg-docker.env.example.
+borg-docker/borg-docker.env
