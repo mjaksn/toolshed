@@ -120,6 +120,22 @@ archives() {
     borg_in list --format '{id} {archive}{NL}' "$repo"
 }
 
+# Replace the current client's record with the given list. It is written
+# beside the record and moved over it, so a failed write, say on a full disk,
+# leaves the old record whole rather than a short one that would hide the
+# next deletion.
+save_record() {
+    local tmp
+    if tmp="$(mktemp "${record}.XXXXXX")" \
+        && printf '%s\n' "$1" > "$tmp" \
+        && mv -f "$tmp" "$record"; then
+        return 0
+    fi
+    echo "   could not write ${record}; the old record is unchanged"
+    rm -f "${tmp:-}"
+    return 1
+}
+
 # Repositories nobody will prune, said once so they are not forgotten.
 for dir in "$repo_base"/*/; do
     client="$(basename "$dir")"
@@ -187,7 +203,7 @@ for passfile in "${passfiles[@]}"; do
             echo "   prune failed, so nothing is compacted"
         fi
         if now="$(archives)"; then
-            (umask 077; printf '%s\n' "$now" > "$record")
+            save_record "$now" || rc=1
         else
             echo "   could not list the archives after pruning; the record is unchanged"
             rc=1
