@@ -266,21 +266,25 @@ so that nothing is given to borg twice.
 Named volumes are backed up without a question, being under the volumes
 directory, so it then asks about each volume larger than
 `LARGE_VOLUME_MB`, showing its size and how much of it changed in the last
-day. Saying yes adds the volume to `BORG_EXCLUDES`; saying no adds its name
-to `KEPT_VOLUMES`. Either way it is not asked about again, and neither is a
+day. This question is the other way round from the one about directories:
+it asks whether to **leave the volume out**, so yes excludes it, adding it to
+`BORG_EXCLUDES`, and no keeps backing it up, adding its name to
+`KEPT_VOLUMES`. Either way it is not asked about again, and neither is a
 volume already excluded wholly or in part. The changed figure matters most:
 borg reads every changed file in full on every run, while the containers
 are down, so it is roughly what each night costs.
 
-Rules of thumb when it asks:
+Rules of thumb for what to keep in the backup, whichever question is asking:
 
 - Application state, such as databases, configuration and a Zigbee network's
-  data: **yes**.
-- Large data that churns, such as video and logs: **no**; back that up some
-  other way. That includes a database of many gigabytes written all day,
-  such as a history or metrics store, and a cache that can be fetched again.
-- Sockets, cookies and small configuration files: yes. They are tiny, and it
-  saves a step at restore time.
+  data: **keep it**. Yes to the directory question, no to the volume one.
+- Large data that churns, such as video and logs: **leave it out**, and back
+  it up some other way if it matters. That includes a database of many
+  gigabytes written all day, such as a history or metrics store, and a cache
+  that can be fetched again. No to the directory question, yes to the volume
+  one.
+- Sockets, cookies and small configuration files: keep them. They are tiny,
+  and keeping them saves a step at restore time.
 
 **3/8 SSH key.** Generates `/root/.ssh/borg_ed25519` if it is missing, and
 tries it against the server. If the server already accepts it the step is
