@@ -210,6 +210,7 @@ without the third.
 | `REPO_NAME` | `containers` | The repository's directory under `/backup/<client>/` |
 | `REPO_PATH` | `/backup/<client>/<REPO_NAME>` | The full path on the server, for a server laid out differently. It must start with `/`. |
 | `BACKUP_TIME` | `03:30` | When the timer starts, as `HH:MM`. Up to 15 minutes of jitter is added. |
+| `BACKUP_TIMEOUT_MIN` | `240` | How many minutes `borg create` may run, with every container down, before it is stopped and they are started again |
 | `PROJECTS_DIR` | found, see above | The compose projects directory, if any |
 | `VOLUMES_DIR` | from `docker info` | Docker's volumes directory |
 | `EXTRA_DIRS` | none | More paths to back up, separated by spaces |
@@ -355,7 +356,14 @@ If `/etc/borg-backup.env` does not load, say because a hand edit broke its
 quoting, or the running containers cannot be listed, because Docker is not
 answering, the run exits 2 before stopping anything or backing anything up. If any
 container fails to stop, it may still be writing, so the run starts again
-those that did stop and exits 2 without backing up. A container that fails
+those that did stop and exits 2 without backing up. `borg create` has a
+deadline of `BACKUP_TIMEOUT_MIN` minutes, and its SSH connection sends
+keepalives, so a server that stops answering ends the run within a couple of
+minutes, and a backup that runs on far too long is stopped at the deadline;
+either way the containers are started again and the run fails. A first
+backup of a lot of data can need longer than the default four hours; set
+`BACKUP_TIMEOUT_MIN` higher in `/etc/borg-backup.env` for it, and back down
+afterwards. A container that fails
 to start again after the backup also fails the run, with Docker's error in
 the journal, so an application left down never hides behind a successful
 backup.

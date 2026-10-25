@@ -137,6 +137,7 @@ setting SSH_ALIAS "${prev_alias:-borg-server}"
 setting CLIENT_NAME "$(hostname -s)"
 setting REPO_NAME containers
 setting BACKUP_TIME 03:30
+setting BACKUP_TIMEOUT_MIN 240
 setting SERVER_KEYS_DIR "<the borgserver sshkeys directory>/clients"
 setting SERVER_KEY_OWNER ""
 setting BORGSERVER_CONTAINER borgserver
@@ -153,6 +154,7 @@ fi
 [ -n "$SERVER_HOST" ] || die "No server address. Set SERVER_HOST."
 [[ "$SERVER_PORT" =~ ^[0-9]+$ ]] || die "SERVER_PORT '$SERVER_PORT' is not a port number."
 [[ "$BACKUP_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "BACKUP_TIME '$BACKUP_TIME' is not HH:MM."
+[[ "$BACKUP_TIMEOUT_MIN" =~ ^[1-9][0-9]*$ ]] || die "BACKUP_TIMEOUT_MIN '$BACKUP_TIMEOUT_MIN' is not a whole number of minutes."
 [[ "$CLIENT_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || die "CLIENT_NAME '$CLIENT_NAME' may hold only letters, digits, '.', '_' and '-'."
 [[ "$SSH_ALIAS" =~ ^[A-Za-z0-9._-]+$ ]] || die "SSH_ALIAS '$SSH_ALIAS' may hold only letters, digits, '.', '_' and '-'."
 [[ "$REPO_PATH" == /* ]] || die "REPO_PATH '$REPO_PATH' must be absolute."
@@ -527,7 +529,10 @@ fi
 
 export BORG_REPO="$REPO"
 export BORG_PASSCOMMAND="cat ${PASSFILE}"
-export BORG_RSH="ssh -o BatchMode=yes"
+# Keepalives end a connection to a server that has stopped answering in
+# about two minutes, rather than leaving borg waiting on it.
+RSH="ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=4"
+export BORG_RSH="$RSH"
 # Borg asks before using a repository it remembers at another address. The
 # switch was agreed to above, so the question is answered here.
 if [ "$relocated" -eq 1 ]; then export BORG_RELOCATED_REPO_ACCESS_IS_OK=yes; fi
@@ -558,7 +563,7 @@ step "6/8  Backup script"
     echo "# BORG_EXCLUDES here freely; to move the repository, run setup.sh again."
     echo "BORG_REPO=$(envq "$REPO")"
     echo "BORG_PASSCOMMAND=$(envq "cat ${PASSFILE}")"
-    echo "BORG_RSH=$(envq "ssh -o BatchMode=yes")"
+    echo "BORG_RSH=$(envq "$RSH")"
     echo "SERVER_HOST=$(envq "$SERVER_HOST")"
     echo "SERVER_PORT=$(envq "$SERVER_PORT")"
     echo "SERVER_USER=$(envq "$SERVER_USER")"
@@ -573,6 +578,7 @@ step "6/8  Backup script"
     echo "SKIP_DIRS=$(envq "$SKIP_DIRS")"
     echo "KEPT_VOLUMES=$(envq "$KEPT_VOLUMES")"
     echo "LARGE_VOLUME_MB=$(envq "$LARGE_VOLUME_MB")"
+    echo "BACKUP_TIMEOUT_MIN=$(envq "$BACKUP_TIMEOUT_MIN")"
     echo "BORG_EXCLUDES=$(envq "$BORG_EXCLUDES")"
 } > "${ENV_FILE}.new"
 chmod 600 "${ENV_FILE}.new"
@@ -671,13 +677,19 @@ if [ -n "$running" ]; then
     fi
 fi
 
-borg create \
+# Every container is down while this runs, so it has a deadline: a server
+# that stalls without dropping the connection must not keep them down for
+# good. timeout stops borg and this script carries on to the restart.
+timeout --kill-after=5m "${BACKUP_TIMEOUT_MIN:-240}m" borg create \
     --stats \
     --compression zstd,6 \
     "${exclude_args[@]}" \
     "::${prefix}-{now:%Y-%m-%dT%H:%M}" \
     "${sources[@]}"
 rc=$?
+if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "ERROR: borg ran past BACKUP_TIMEOUT_MIN (${BACKUP_TIMEOUT_MIN:-240} minutes) and was stopped." >&2
+fi
 
 if [ "$rc" -eq 1 ]; then
     echo "borg finished with warnings, shown above; the archive was written." >&2
