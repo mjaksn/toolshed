@@ -493,7 +493,18 @@ if [ -f "$SSH_CONFIG" ]; then
 fi
 normalised_desired="$(awk 'NF { $1 = $1; print }' <<<"$desired_block")"
 
-if [ "$current_block" = "$normalised_desired" ]; then
+# The stanza has to be first in the file as well as right: ssh takes the
+# first value it finds for each option, so a setting for every host above
+# it, or an earlier Host *, would win over it.
+alias_first=0
+if [ -f "$SSH_CONFIG" ] && awk -v a="$SSH_ALIAS" '
+        NF && $1 !~ /^#/ { exit !(tolower($1) == "host" && NF == 2 && $2 == a) }
+        END { if (NR == 0) exit 1 }
+    ' "$SSH_CONFIG"; then
+    alias_first=1
+fi
+
+if [ "$current_block" = "$normalised_desired" ] && [ "$alias_first" -eq 1 ]; then
     echo "'${SSH_ALIAS}' in ${SSH_CONFIG} is already up to date"
 else
     rest="$(mktemp)"

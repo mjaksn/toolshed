@@ -312,10 +312,11 @@ you add it and restart the container.
 stanza for the alias is already there and differs, it replaces it and keeps
 the old file as `/root/.ssh/config.bak-borg-docker`. A stanza it writes goes
 at the top of the file, since ssh takes the first value it finds for each
-option and an earlier `Host *` would otherwise win; if the file began with
-settings for every host, a `Host *` line after the stanza keeps them that
-way. Then it connects
-through the alias, and stops with ssh's own message if the key is refused.
+option and an earlier `Host *` would otherwise win, and a stanza that is
+already right but not first is moved there for the same reason; if the
+file began with settings for every host, a `Host *` line after the stanza
+keeps them that way. Then it connects through the alias, and stops with
+ssh's own message if the key is refused.
 
 **5/8 Passphrase and repository.** With no passphrase file, it first asks
 whether this is a rebuild of a host whose repository already exists. If so,
