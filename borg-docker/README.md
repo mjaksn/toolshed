@@ -336,7 +336,10 @@ the run is not marked failed. Status 2 or more is an error, and is passed on.
 If the running containers cannot be listed, because Docker is not answering,
 the run exits 2 before stopping anything or backing anything up. If any
 container fails to stop, it may still be writing, so the run starts again
-those that did stop and exits 2 without backing up.
+those that did stop and exits 2 without backing up. A container that fails
+to start again after the backup also fails the run, with Docker's error in
+the journal, so an application left down never hides behind a successful
+backup.
 
 Archives are named `<client>-<YYYY-MM-DDTHH:MM>`.
 
@@ -582,7 +585,7 @@ on Debian; if it complains, that package is what is missing.
 | `Connection refused` | The container is not running. Check that no other backup job stopped it. |
 | `Host key verification failed` | The server's host key changed, usually because the container was recreated without its `sshkeys/host` directory. If you trust the change, remove the old entry with `sudo ssh-keygen -f /root/.ssh/known_hosts -R '[<host>]:<port>'`, or just `<host>` on port 22. |
 | `Failed to create/acquire the lock` | A previous run died during a backup. Check that none is running, then `bb break-lock`, or `break-lock` from the server. |
-| A container did not come back | `docker ps -a`, then `docker start <name>`. The script restarts only what was running when it began. |
+| A container did not come back | The run fails with `not every container started again`, after Docker's own error. Check `docker ps -a`, fix the cause, then `docker start <name>`. The script restarts only what was running when it began. |
 | The run failed with `no longer exist` | A path in `EXTRA_DIRS` was removed. Take it out of `/etc/borg-backup.env`. |
 | `Cache, or information obtained from the security directory is newer than repository` | Usually after a prune on the server, or a repository restored from a snapshot. If you know why, `bb delete --cache-only` and run again; it rebuilds. |
 | The timer shows no next run | `sudo systemctl enable --now borg-backup.timer` |

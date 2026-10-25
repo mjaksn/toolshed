@@ -535,7 +535,8 @@ cat > "$new_script" <<'EOF'
 #
 # If the running containers cannot be listed, the run exits 2 before
 # stopping anything or backing anything up. If any of them fails to stop, it
-# exits 2 without backing up, after starting again those that did stop.
+# exits 2 without backing up, after starting again those that did stop. A
+container that fails to start again afterwards makes the run exit 2 as well.
 #
 # A path listed for backup that no longer exists is left out, the rest are
 # backed up, and the run then exits 2 so the failure shows. Borg's own exit
@@ -574,11 +575,18 @@ if ! running="$(docker ps -q)"; then
 fi
 running="$(tr '\n' ' ' <<<"$running")"
 
+# Runs on every exit. A container that will not start again fails the run,
+# with Docker's own error in the journal, unless the run had failed already.
 restart_containers() {
+    local status=$?
     if [ -n "$running" ]; then
         # shellcheck disable=SC2086
-        docker start $running >/dev/null 2>&1 || true
+        if ! docker start $running >/dev/null; then
+            echo "ERROR: not every container started again; check docker ps -a." >&2
+            [ "$status" -ne 0 ] || status=2
+        fi
     fi
+    exit "$status"
 }
 trap restart_containers EXIT
 
