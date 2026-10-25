@@ -461,8 +461,10 @@ each client is shut out while its repository is maintained: its line comes
 out of the `authorized_keys` file the container builds from the key files,
 the script checks that it has no session still open, and the line goes back
 once that client is done, or when the script exits for any reason short of
-being killed outright. A client with a session open, which usually means a
-backup in progress, is skipped for that run. A backup that tries to start
+being killed outright. Taking a key out stops new logins but not a
+connection already made, and which client a connection belongs to cannot be
+told from the server, so while any SSH session of the `borg` user is open,
+usually a backup in progress, each client is skipped for that run. A backup that tries to start
 while its client is shut out fails and says so in that client's journal,
 which is one more reason to run retention well clear of the backup window.
 If the script is ever killed outright, restarting the container rebuilds

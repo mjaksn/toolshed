@@ -198,8 +198,14 @@ suspend_client() {
         rc=1
         return 1
     fi
-    if grep -q -F -- "--restrict-to-path /backup/${client} " <<<"$procs"; then
-        echo "   ${client} has a session open (backup in progress?); skipping this run"
+    # Taking the key out stops new logins, not a connection already made,
+    # and a multiplexed connection can sit idle with no borg serve to show
+    # for it until it opens a channel. Which client a connection belongs to
+    # cannot be told from here, so any session of the borg user at all, or
+    # any borg serve, means skipping this client. Retention runs when the
+    # server should be quiet, so normally there is none.
+    if grep -q -E -e '^sshd(-session)?: borg([@ ]|$)' -e 'borg serve' <<<"$procs"; then
+        echo "   an SSH session to ${container} is open (a backup in progress?); skipping ${client} this run"
         resume_client || rc=1
         return 1
     fi
