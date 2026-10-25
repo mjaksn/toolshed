@@ -237,8 +237,37 @@ covered() {
     return 1
 }
 
-# Every bind mount source and every compose project directory is a
-# candidate. Those already covered, and system paths that are never worth
+# A named volume whose driver mounts something, such as an NFS share, or a
+# host directory through type=none,o=bind, is mounted at its _data only while
+# a container uses it, so once the containers stop the backup would find an
+# empty directory there. A bind-backed volume's real directory is offered
+# below like any other; anything else is reported, since it has to be backed
+# up where it lives.
+volume_sources=()
+mounted_volumes=" "
+mapfile -t volume_info < <(
+    docker volume ls -q 2>/dev/null | while IFS= read -r v; do
+        docker volume inspect -f '{{.Name}}|{{.Driver}}|{{json .Options}}' "$v" 2>/dev/null
+    done
+)
+for line in "${volume_info[@]}"; do
+    IFS='|' read -r v driver opts <<<"$line"
+    vtype="$(sed -n 's/.*"type":"\([^"]*\)".*/\1/p' <<<"$opts")"
+    vopts="$(sed -n 's/.*"o":"\([^"]*\)".*/\1/p' <<<"$opts")"
+    vdevice="$(sed -n 's/.*"device":"\([^"]*\)".*/\1/p' <<<"$opts")"
+    if [ "$driver" = local ] && [ -z "$vtype" ] && [ -z "$vdevice" ]; then
+        continue
+    fi
+    mounted_volumes+="$v "
+    if [ "$driver" = local ] && [[ ",$vopts," == *,bind,* ]] && [[ "$vdevice" == /* ]]; then
+        volume_sources+=("$vdevice")
+    else
+        warn "Volume ${v} is mounted from elsewhere (driver ${driver}${vtype:+, type ${vtype}}) and is not backed up: its directory is empty once its containers stop. Back it up where it lives."
+    fi
+done
+
+# Every bind mount source, every compose project directory, and the directory
+# behind each bind-backed volume is a candidate. Those already covered, and system paths that are never worth
 # backing up, are left out; each of the rest is offered once, and the answer
 # is remembered.
 mapfile -t candidates < <(
@@ -252,6 +281,7 @@ mapfile -t candidates < <(
     | grep -v -x -e '<no value>' -e '' \
     | sort -u || true
 )
+candidates+=("${volume_sources[@]}")
 for d in "${candidates[@]}"; do
     d="${d%/}"
     [ -n "$d" ] && [ -e "$d" ] || continue
@@ -292,6 +322,9 @@ KEPT_VOLUMES="$kept"
 mapfile -t volume_dirs < <(find "$VOLUMES_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 for vdir in "${volume_dirs[@]}"; do
     v="$(basename "$vdir")"
+    # A mount-backed volume's size here is whatever is mounted now, and it
+    # was dealt with above.
+    case "$mounted_volumes" in *" $v "*) continue ;; esac
     volume_decided "$v" && continue
     mb="$(du -sm "$vdir" 2>/dev/null | cut -f1 || true)"
     [ -n "$mb" ] && [ "$mb" -ge "$LARGE_VOLUME_MB" ] || continue

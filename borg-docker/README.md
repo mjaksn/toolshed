@@ -53,7 +53,7 @@ project or volume is picked up without anyone remembering to add it.
 | Path | What it is |
 | --- | --- |
 | `PROJECTS_DIR` | A directory of compose projects, when there is one. Found from the `PROJECTS_DIRECTORY` of an Arcane container, running or stopped, when that path exists on the host, else `/opt/arcane/projects` if it exists. Optional. |
-| `VOLUMES_DIR` | Every named Docker volume. Found from `docker info`, normally `/var/lib/docker/volumes`. Each volume larger than `LARGE_VOLUME_MB` is asked about once, so a large one can be left out. |
+| `VOLUMES_DIR` | Every named Docker volume. Found from `docker info`, normally `/var/lib/docker/volumes`. Each volume larger than `LARGE_VOLUME_MB` is asked about once, so a large one can be left out. A volume whose driver mounts something, an NFS share or a host directory bound with `o=bind`, is empty here once its containers stop, so `setup.sh` offers a bound volume's real directory as an extra one, and warns that anything else is not backed up. |
 | `EXTRA_DIRS` | Anything else you said yes to. `setup.sh` looks at every container's bind mounts and every compose project's directory, and asks about each one the two above do not already cover. |
 
 Not backed up: images (they can be pulled again), kernel and runtime paths
@@ -257,8 +257,11 @@ borgbackup`, and installs nothing else. Stops if the installed borg is not
 1.x.
 
 **2/8 What to back up.** Settles the projects and volumes directories, then
-looks at every container's bind mounts and compose project directories and
-asks, one at a time, about each one not already covered. Kernel and runtime
+looks at every container's bind mounts and compose project directories, and
+at the host directory behind any volume bound to one, and asks, one at a
+time, about each one not already covered. A volume mounted from anywhere
+else, such as NFS, gets a warning instead: its directory is empty while the
+containers are stopped, so it has to be backed up where it lives. Kernel and runtime
 paths are left out without asking. A path you say yes to joins `EXTRA_DIRS`;
 one you say no to joins `SKIP_DIRS` and is not asked about again. A
 previously chosen path that no longer exists is dropped with a warning, and
