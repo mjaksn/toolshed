@@ -190,8 +190,15 @@ suspend_client() {
         return 1
     fi
     suspended="$client"
-    if docker exec "$container" sh -c 'for p in /proc/[0-9]*; do tr "\0" " " < "$p/cmdline" 2>/dev/null; echo; done' \
-        | grep -q -F -- "--restrict-to-path /backup/${client} "; then
+    # The whole listing is taken before it is searched: grep -q stopping at
+    # the first match could otherwise break the pipe and read as no match.
+    if ! procs="$(docker exec "$container" sh -c 'for p in /proc/[0-9]*; do tr "\0" " " < "$p/cmdline" 2>/dev/null; echo; done')"; then
+        echo "   could not list the processes in ${container}; skipping this run"
+        resume_client || true
+        rc=1
+        return 1
+    fi
+    if grep -q -F -- "--restrict-to-path /backup/${client} " <<<"$procs"; then
         echo "   ${client} has a session open (backup in progress?); skipping this run"
         resume_client || rc=1
         return 1
