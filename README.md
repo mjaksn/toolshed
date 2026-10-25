@@ -15,6 +15,11 @@ a repository of its own goes in here.
 - [apitrace](apitrace/), a Win32 API call tracer, the Windows analogue of strace:
   it launches a program as a debuggee and logs the calls it makes into the DLLs
   you select. In C and in Python, the same program twice.
+- [borg-docker](borg-docker/), a pair of bash scripts for nightly, encrypted,
+  append-only Borg backups of Docker hosts: one sets a host up to stop its
+  containers, back up their projects and volumes to a Borg server over SSH and
+  start them again, and the other prunes every client's repository on the
+  server, the one place deletion is possible.
 - [claude-sessions](claude-sessions/), PowerShell scripts that record which Claude
   Code sessions are open in a console window and reopen them after a reboot.
 - [dispatch-desk](dispatch-desk/), a PowerShell module that creates Windows
