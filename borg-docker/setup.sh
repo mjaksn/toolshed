@@ -660,32 +660,35 @@ sources=()
 missing=()
 # Borg stores a path given to it that is a symlink as the link itself, not
 # what it points to, so each path is resolved first and the target is what
-# gets backed up. Each one that moved is remembered, as its path and then
-# its target, for the excludes below.
-links=()
+# gets backed up.
 # shellcheck disable=SC2086
 for d in ${PROJECTS_DIR:-} "${VOLUMES_DIR:-/var/lib/docker/volumes}" ${EXTRA_DIRS:-}; do
-    if [ -e "$d" ]; then
-        real="$(readlink -f "$d")"
-        sources+=("$real")
-        if [ "$real" != "${d%/}" ]; then links+=("${d%/}" "$real"); fi
-    else
-        missing+=("$d")
-    fi
+    if [ -e "$d" ]; then sources+=("$(readlink -f "$d")"); else missing+=("$d"); fi
 done
 
-# An exclude written under a path that was a symlink would match nothing in
-# the archive, which holds the target, so its leading path moves with it.
-# Only that leading path changes, so a pattern keeps its meaning.
+# An exclude has to name a path the way the archive holds it, which is with
+# every symlink resolved, so each one is resolved the same way: the leading
+# part of it that holds no pattern character has its symlinks resolved, and
+# any pattern after that is kept as written. That works however the linked
+# paths nest. An exclude with a style prefix, such as re:, is left alone.
+resolve_exclude() {
+    local x="$1" lead dir
+    case "$x" in /*) ;; *) printf '%s' "$x"; return ;; esac
+    lead="${x%%[*?[]*}"
+    if [ "$lead" = "$x" ]; then
+        readlink -m "$x"
+        return
+    fi
+    dir="${lead%/*}"
+    if [ -n "$dir" ]; then
+        printf '%s%s' "$(readlink -m "$dir")" "${x#"$dir"}"
+    else
+        printf '%s' "$x"
+    fi
+}
 exclude_args=()
 for x in ${BORG_EXCLUDES:-}; do
-    i=0
-    while [ "$i" -lt "${#links[@]}" ]; do
-        from="${links[$i]}"; to="${links[$((i + 1))]}"
-        case "$x" in "$from"|"$from"/*) x="${to}${x#"$from"}"; break ;; esac
-        i=$((i + 2))
-    done
-    exclude_args+=(--exclude "$x")
+    exclude_args+=(--exclude "$(resolve_exclude "$x")")
 done
 
 prefix="${CLIENT_NAME:-}"
