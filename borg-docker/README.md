@@ -575,15 +575,26 @@ on Debian; if it complains, that package is what is missing.
    on the server under the same client name, replacing the old file. At step
    5 it asks whether this is a rebuild; say yes and paste the saved
    passphrase. It then finds the existing repository and does not create
-   one. Say **no** to the backup at the end.
+   one. Say **no** to the backup at the end, and pause the timer with `sudo
+   systemctl disable --now borg-backup.timer`, because nothing it found to
+   back up exists yet.
 3. Stop every container and extract the latest archive over `/`:
    ```
    docker stop $(docker ps -q)
    cd /
    bb extract --list ::<latest archive>
    ```
-4. Bring each project up, or let whatever manages them do it, check them,
-   then run a backup to confirm the chain is intact.
+4. Bring each project up, or let whatever manages them do it, and check
+   them.
+5. Run `setup.sh` again. The projects directory and bind mounts exist now,
+   so step 2 finds them and asks about each one, and step 7 turns the timer
+   back on. Check its list of what will be backed up against what the archive
+   held:
+   ```
+   bb list ::<latest archive> --short | cut -d/ -f1-4 | sort -u
+   ```
+   Then run a backup, and compare its size with the archive you restored
+   from, using `bb info ::<archive>`, before trusting the chain again.
 
 ## Troubleshooting
 
