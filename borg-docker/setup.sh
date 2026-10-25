@@ -414,6 +414,7 @@ normalised_desired="$(awk 'NF { $1 = $1; print }' <<<"$desired_block")"
 if [ "$current_block" = "$normalised_desired" ]; then
     echo "'${SSH_ALIAS}' in ${SSH_CONFIG} is already up to date"
 else
+    rest="$(mktemp)"
     new_config="$(mktemp)"
     if [ -f "$SSH_CONFIG" ]; then
         cp -p "$SSH_CONFIG" "${SSH_CONFIG}.bak-borg-docker"
@@ -424,12 +425,25 @@ else
             skip { next }
             NF == 0 { blanks++; next }
             { while (blanks > 0) { print ""; blanks-- } print }
-        ' "$SSH_CONFIG" > "$new_config"
-        if [ -s "$new_config" ]; then echo >> "$new_config"; fi
+        ' "$SSH_CONFIG" > "$rest"
     fi
-    printf '%s\n' "$desired_block" >> "$new_config"
+    # The stanza goes first, because ssh takes the first value it finds for
+    # each option and an earlier Host * would otherwise override it. Settings
+    # at the top of the old file applied to every host, and a Host * line
+    # after the stanza keeps them doing so.
+    {
+        printf '%s\n' "$desired_block"
+        if [ -s "$rest" ]; then
+            echo
+            first="$(awk 'NF && $1 !~ /^#/ { print tolower($1); exit }' "$rest")"
+            if [ -n "$first" ] && [ "$first" != host ] && [ "$first" != match ]; then
+                echo "Host *"
+            fi
+            cat "$rest"
+        fi
+    } > "$new_config"
     install -m 600 "$new_config" "$SSH_CONFIG"
-    rm -f "$new_config"
+    rm -f "$rest" "$new_config"
     if [ -n "$current_block" ]; then
         echo "Updated '${SSH_ALIAS}' in ${SSH_CONFIG} (previous file kept as ${SSH_CONFIG}.bak-borg-docker)"
     else
