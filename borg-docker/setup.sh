@@ -198,12 +198,19 @@ VOLUMES_DIR="${VOLUMES_DIR%/}"
 # real directory, so the volumes are found, and excluded, by that path.
 VOLUMES_DIR="$(readlink -f "$VOLUMES_DIR")"
 
+# Docker is asked once for its containers and volumes, and a failure stops
+# setup here. A Docker that did not answer gives an empty list, which would
+# look like a host with nothing more to back up, and the paths it would have
+# named would go unprotected without a word.
+container_ids="$(docker ps -aq)" || die "Could not list Docker's containers."
+volume_names="$(docker volume ls -q)" || die "Could not list Docker's volumes."
+
 setting PROJECTS_DIR ""
 if [ -z "$PROJECTS_DIR" ]; then
     # Arcane keeps its compose projects in one directory, named by the
     # PROJECTS_DIRECTORY variable of its container. Use it when that path
     # exists on this host too.
-    for cid in $(docker ps -aq); do
+    for cid in $container_ids; do
         img="$(docker inspect -f '{{.Config.Image}}' "$cid")"
         if [[ "$img" == *arcane* ]]; then
             found="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" \
@@ -271,11 +278,13 @@ covered() {
 # up where it lives.
 volume_sources=()
 mounted_volumes=" "
-mapfile -t volume_info < <(
-    docker volume ls -q 2>/dev/null | while IFS= read -r v; do
-        docker volume inspect -f '{{.Name}}|{{.Driver}}|{{json .Options}}' "$v" 2>/dev/null
-    done
-)
+volume_info=()
+if [ -n "$volume_names" ]; then
+    # shellcheck disable=SC2086
+    info="$(docker volume inspect -f '{{.Name}}|{{.Driver}}|{{json .Options}}' $volume_names)" \
+        || die "Could not inspect Docker's volumes."
+    mapfile -t volume_info <<<"$info"
+fi
 for line in "${volume_info[@]}"; do
     IFS='|' read -r v driver opts <<<"$line"
     vtype="$(sed -n 's/.*"type":"\([^"]*\)".*/\1/p' <<<"$opts")"
@@ -292,17 +301,23 @@ for line in "${volume_info[@]}"; do
     fi
 done
 
-# Every bind mount source, every compose project directory, and the directory
-# behind each bind-backed volume is a candidate. Those already covered, and system paths that are never worth
-# backing up, are left out; each of the rest is offered once, and the answer
-# is remembered.
+# Every bind mount source, every compose project directory, and the
+# directory behind each bind-backed volume is a candidate. Those already
+# covered, and system paths that are never worth backing up, are left out;
+# each of the rest is offered once, and the answer is remembered.
+mounts=""
+labels=""
+if [ -n "$container_ids" ]; then
+    # shellcheck disable=SC2086
+    mounts="$(docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' $container_ids)" \
+        || die "Could not inspect Docker's containers."
+    # shellcheck disable=SC2086
+    labels="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $container_ids)" \
+        || die "Could not inspect Docker's containers."
+fi
+# The filters may leave nothing, which is an answer and not a failure.
 mapfile -t candidates < <(
-    {
-        # shellcheck disable=SC2046
-        docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' $(docker ps -aq) 2>/dev/null
-        # shellcheck disable=SC2046
-        docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $(docker ps -aq) 2>/dev/null
-    } \
+    printf '%s\n%s\n' "$mounts" "$labels" \
     | grep -v -E '^(/var/run/docker\.sock|/etc/localtime|/etc/timezone|/dev|/sys|/proc|/run|/tmp)(/|$)' \
     | grep -v -x -e '<no value>' -e '' \
     | sort -u || true

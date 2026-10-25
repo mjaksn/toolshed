@@ -267,7 +267,9 @@ looks at every container's bind mounts and compose project directories, and
 at the host directory behind any volume bound to one, and asks, one at a
 time, about each one not already covered. A volume mounted from anywhere
 else, such as NFS, gets a warning instead: its directory is empty while the
-containers are stopped, so it has to be backed up where it lives. Kernel and runtime
+containers are stopped, so it has to be backed up where it lives. If
+Docker fails to answer while it is looking, setup stops there rather than
+carry on with a partial list that would leave paths unprotected. Kernel and runtime
 paths are left out without asking. A path you say yes to joins `EXTRA_DIRS`;
 one you say no to joins `SKIP_DIRS` and is not asked about again. A
 previously chosen path that no longer exists is dropped with a warning, and
