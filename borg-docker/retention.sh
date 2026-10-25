@@ -120,6 +120,11 @@ archives() {
     borg_in list --format '{id} {archive}{NL}' "$repo"
 }
 
+# The IDs alone, from such a list on stdin, sorted for comm.
+ids() {
+    cut -d' ' -f1 | sed '/^$/d' | LC_ALL=C sort
+}
+
 # Replace the current client's record with the given list. It is written
 # beside the record and moved over it, so a failed write, say on a full disk,
 # leaves the old record whole rather than a short one that would hide the
@@ -193,20 +198,55 @@ for passfile in "${passfiles[@]}"; do
     fi
 
     prune_ok=1
-    borg_in prune "${prune_args[@]}" "${keep_args[@]}" \
-        --glob-archives "${client}-*" "$repo" || { prune_ok=0; rc=1; }
+    prune_out="$(borg_in prune "${prune_args[@]}" "${keep_args[@]}" \
+        --glob-archives "${client}-*" "$repo" 2>&1)" || { prune_ok=0; rc=1; }
+    printf '%s\n' "$prune_out"
 
+    # Borg holds its lock only for the length of each command, so a client
+    # can delete an archive between the check above and compact below. The
+    # archives are listed again just before compacting, and anything gone
+    # that prune did not report pruning stops it. That leaves the moment
+    # between this listing and compact taking its lock, and a deletion there
+    # is reported after compact rather than prevented.
     if [ "$dry_run" -eq 0 ]; then
-        if [ "$prune_ok" -eq 1 ]; then
-            docker exec -u borg "$container" borg compact "$repo" || rc=1
-        else
-            echo "   prune failed, so nothing is compacted"
-        fi
-        if now="$(archives)"; then
-            save_record "$now" || rc=1
-        else
-            echo "   could not list the archives after pruning; the record is unchanged"
+        pruned="$(grep '^Pruning archive' <<<"$prune_out" | grep -o '\[[0-9a-f]\{64\}\]' | tr -d '[]' | LC_ALL=C sort || true)"
+        if ! after="$(archives)"; then
+            echo "   could not list the archives after pruning; nothing is compacted and the record is unchanged"
             rc=1
+        else
+            unexpected="$(comm -23 <(ids <<<"$now") <(ids <<<"$after") | comm -23 - <(printf '%s\n' "$pruned"))"
+            if [ -n "$unexpected" ]; then
+                echo "   archives gone during this run that prune did not remove:"
+                grep -F -f <(printf '%s\n' "$unexpected") <<<"$now" | sed 's/^/     /'
+                echo "   A client may have deleted them. Nothing is compacted, and the record"
+                echo "   still lists them, so the next run reports them too."
+                # Recorded as before, less what prune did report, so that the
+                # next run names only these.
+                keep="$now"
+                if [ -n "$pruned" ]; then
+                    keep="$(grep -v -F -f <(printf '%s\n' "$pruned") <<<"$now" || true)"
+                fi
+                save_record "$keep" || rc=1
+                rc=1
+            elif [ "$prune_ok" -eq 0 ]; then
+                echo "   prune failed, so nothing is compacted"
+                save_record "$after" || rc=1
+            else
+                docker exec -u borg "$container" borg compact "$repo" || rc=1
+                if ! final="$(archives)"; then
+                    echo "   could not list the archives after compacting; recording the list from before"
+                    save_record "$after" || rc=1
+                    rc=1
+                elif lost="$(comm -23 <(ids <<<"$after") <(ids <<<"$final"))"; [ -n "$lost" ]; then
+                    echo "   archives gone just before compacting, whose data may now be lost:"
+                    grep -F -f <(printf '%s\n' "$lost") <<<"$after" | sed 's/^/     /'
+                    echo "   The record still lists them, so the next run reports them too."
+                    save_record "$after" || rc=1
+                    rc=1
+                else
+                    save_record "$final" || rc=1
+                fi
+            fi
         fi
     fi
 

@@ -439,6 +439,15 @@ the deletion, following the append-only section of Borg's documentation for
 `borg serve`, which explains how to use the repository's `transactions` log
 to do it.
 
+Borg holds its lock only for the length of each command, so a client could
+also delete an archive while `retention.sh` is running. The archives are
+listed again after prune, and one gone that prune did not report removing
+stops the compact in the same way. That leaves the moment between that
+listing and compact taking its lock: a deletion there cannot be stopped,
+but it is reported once compact has run, and the record keeps the archive,
+so the next run reports it again. Running retention outside the clients'
+backup window keeps that moment as quiet as it can be.
+
 The first run for each client has no record to compare with, and says so.
 A dry run compares and reports but never writes the record.
 
