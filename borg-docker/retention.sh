@@ -8,7 +8,7 @@
 # inside the container works on the repositories as local files, bypasses
 # borg serve and its append-only flag, and is the one place deletion happens.
 #
-# Run as root on the server:  ./retention.sh [--env FILE] [--dry-run]
+# Run as root on the server:  ./retention.sh [--env FILE] [--dry-run] [--record]
 #
 # A client is pruned only when RETENTION_PASSDIR holds <client>.pass with its
 # repository passphrase; a repository without one is reported and left alone.
@@ -25,7 +25,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<'EOF'
-Usage: ./retention.sh [--env FILE] [--dry-run]
+Usage: ./retention.sh [--env FILE] [--dry-run] [--record]
 
 Prunes, compacts and checks every client repository in a borgserver
 container. Run it as root on the machine the container runs on.
@@ -33,6 +33,8 @@ container. Run it as root on the machine the container runs on.
   --env FILE   read settings from FILE instead of borg-docker.env beside
                this script
   --dry-run    list what prune would delete, and delete nothing
+  --record     only check each client's archives against its record and
+               update the record; prune, compact and shut out nothing
   -h, --help   print this help
 EOF
 }
@@ -40,11 +42,13 @@ EOF
 SETTINGS_FILE=""
 explicit_settings=0
 dry_run=0
+record_only=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --env) [ $# -ge 2 ] || { usage >&2; exit 2; }; SETTINGS_FILE="$2"; explicit_settings=1; shift 2 ;;
         --env=*) SETTINGS_FILE="${1#--env=}"; explicit_settings=1; shift ;;
         --dry-run) dry_run=1; shift ;;
+        --record) record_only=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
@@ -115,6 +119,9 @@ if [ "$dry_run" -eq 1 ]; then
 else
     prune_args=(--list --stats)
 fi
+if [ "$record_only" -eq 1 ]; then
+    echo "Record run: archives are checked against the records, and nothing is pruned or compacted."
+fi
 
 rc=0
 
@@ -179,7 +186,7 @@ resume_client() {
 # Fails, with the reason said, when the client should be skipped this run.
 suspend_client() {
     local line n
-    [ "$dry_run" -eq 0 ] || return 0
+    [ "$dry_run" -eq 0 ] && [ "$record_only" -eq 0 ] || return 0
     # The saved copy is the only way back for a client that is out, so
     # nothing may overwrite it: not the next client after a key that would
     # not go back, and not this run after one that was interrupted.
@@ -298,6 +305,17 @@ for passfile in "${passfiles[@]}"; do
         fi
     else
         echo "   no record of its archives yet; this run starts one"
+    fi
+
+    # A record run stops here, having found nothing gone: it brings the
+    # record up to date, so that an archive made since the last run is
+    # watched from now on, and changes nothing in the repository.
+    if [ "$record_only" -eq 1 ]; then
+        if [ "$dry_run" -eq 0 ]; then
+            save_record "$now" || rc=1
+            echo "   recorded $(grep -c . <<<"$now") archives"
+        fi
+        continue
     fi
 
     prune_ok=1

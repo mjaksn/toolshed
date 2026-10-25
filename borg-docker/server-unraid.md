@@ -162,6 +162,17 @@ the clients' backup window. Run it once by hand first with `--dry-run` added
 to that line, then without, and read the output before trusting the
 schedule.
 
+Add a second script the same way, named `borg-record`, with this body:
+
+```bash
+#!/bin/bash
+bash /mnt/user/borg/borg-docker/retention.sh --record
+```
+
+and the custom schedule `0 5 * * 1-6`, Monday to Saturday at 05:00. It only
+checks and updates each client's record of its archives, so that one made
+and deleted again during the week is noticed; the README explains why.
+
 ## Rolling back
 
 The container holds no state of its own. Remove it and recreate it from the

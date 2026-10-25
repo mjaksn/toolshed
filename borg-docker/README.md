@@ -418,13 +418,14 @@ container's `borg` user so that the files keep the ownership the clients
 expect.
 
 ```
-sudo ./retention.sh [--env FILE] [--dry-run]
+sudo ./retention.sh [--env FILE] [--dry-run] [--record]
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--env FILE` | read settings from FILE instead of `borg-docker.env` beside the script |
 | `--dry-run` | list what prune would delete, delete nothing, skip compacting, and leave the record of archives as it is |
+| `--record` | only check each client's archives against its record and bring the record up to date; prune, compact and shut out nothing |
 | `-h`, `--help` | print the usage |
 
 For each client it prunes the archives named `<client>-*` by
@@ -481,6 +482,14 @@ reported and kept in the record, so the next run reports it again.
 The first run for each client has no record to compare with, and says so.
 A dry run compares and reports but never writes the record.
 
+The record only knows about archives that existed at some run, so an
+archive a client made and deleted again between two runs is never seen, and
+the next compact frees its data. Run with `--record` every day, soon after
+the backup window, to keep that gap short: it checks and updates the records
+and changes nothing in the repositories, so it is quick and safe to
+schedule. What remains is an archive made and deleted between one night's
+backup and that morning's record run.
+
 What this does not catch is a client that adds archives rather than
 removing them. Archives created with a false `--timestamp` could push real
 ones outside the keep rules, and prune would then remove them as it should.
@@ -512,12 +521,17 @@ most likely to be compromised.
 
 ### Scheduling
 
-Run it weekly, after the backup window, from root's crontab or whatever the
-server uses for scheduled jobs:
+Run it weekly, after the backup window, and with `--record` on the other
+days, from root's crontab or whatever the server uses for scheduled jobs:
 
 ```
-0 5 * * 0  bash /srv/borg/borg-docker/retention.sh
+0 5 * * 0    bash /srv/borg/borg-docker/retention.sh
+0 5 * * 1-6  bash /srv/borg/borg-docker/retention.sh --record
 ```
+
+The weekly run checks the records as well, so it stands in for that day's
+record run. Two runs at once are refused, so keep them at different times
+if the schedule is changed.
 
 Run it once by hand with `--dry-run` first, and then without, and read the
 output before trusting the schedule. The default rules keep every day for two
