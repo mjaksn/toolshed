@@ -212,14 +212,25 @@ suspend_client() {
         rc=1
         return 1
     fi
-    if ! docker exec "$container" sh -c \
-        'cp -p "$1" "$1.retention" && { grep -v -F "$2" "$1.retention"; [ $? -le 1 ]; } > "$1"' \
-        _ "$keys" "$line"; then
-        echo "   could not take ${client}'s key out; skipping this run"
+    # The original is saved first, and the client counts as shut out from
+    # then on, so that any failure after it, or any exit, puts that copy
+    # back. The filtered list is written beside the live file and moved over
+    # it, so the live file is never half written.
+    if ! docker exec "$container" cp -p "$keys" "${keys}.retention"; then
+        echo "   could not save ${keys}; skipping this run"
         rc=1
         return 1
     fi
     suspended="$client"
+    if ! docker exec "$container" sh -c \
+        'cp -p "$1" "$1.new" && { grep -v -F "$2" "$1.retention"; [ $? -le 1 ]; } > "$1.new" && mv -f "$1.new" "$1"' \
+        _ "$keys" "$line"; then
+        echo "   could not take ${client}'s key out; skipping this run"
+        docker exec "$container" rm -f "${keys}.new" || true
+        resume_client || true
+        rc=1
+        return 1
+    fi
     # The whole listing is taken before it is searched: grep -q stopping at
     # the first match could otherwise break the pipe and read as no match.
     if ! procs="$(docker exec "$container" sh -c 'for p in /proc/[0-9]*; do tr "\0" " " < "$p/cmdline" 2>/dev/null; echo; done')"; then
