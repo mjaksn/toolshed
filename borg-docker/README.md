@@ -180,7 +180,11 @@ version of both.
 
 Both scripts read a settings file, `borg-docker.env`, from beside the script,
 or from wherever `--env FILE` says. It is sourced by bash, so every value is
-quoted. [borg-docker.env.example](borg-docker.env.example) lists every
+quoted. A file that does not load cleanly, for instance a value with spaces
+whose quotes went missing, stops either script before it does anything,
+with bash's own message naming the line, rather than leaving that setting at
+its default. `setup.sh` checks the host's `/etc/borg-backup.env` the same
+way. [borg-docker.env.example](borg-docker.env.example) lists every
 setting with a comment; copy it to `borg-docker.env` and fill in your own.
 That file is the one place your own server address and paths live, and it is
 ignored by git, so it can sit beside the scripts in a checkout and travel to

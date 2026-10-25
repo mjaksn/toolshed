@@ -94,6 +94,15 @@ env_get() {
     bash -c 'set -a; . <(tr -d "\r" <"$1") >/dev/null 2>&1; printf "%s" "${!2-}"' _ "$1" "$2"
 }
 
+# Load FILE once in a shell that stops at the first command that fails. A
+# value that lost its quotes runs part of itself as a command and leaves its
+# setting unset, which env_get alone would quietly read as "use the default".
+check_settings() {
+    [ -n "$1" ] || return 0
+    bash -c 'set -e; set -a; . <(tr -d "\r" <"$1") >/dev/null' _ "$1" \
+        || die "'$1' did not load cleanly, at the error above. Correct it and run again."
+}
+
 # Set VAR from the first source that gives it a value. An empty value counts
 # as no value, so it falls through to the next source.
 setting() {
@@ -111,6 +120,8 @@ envq() {
     printf '"%s"' "$v"
 }
 
+check_settings "$SETTINGS_FILE"
+check_settings "$PREV_FILE"
 if [ -n "$SETTINGS_FILE" ]; then echo "Reading settings from ${SETTINGS_FILE}"; fi
 if [ -n "$PREV_FILE" ]; then echo "Previous configuration found in ${PREV_FILE}; using it where nothing else is set."; fi
 

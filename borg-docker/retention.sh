@@ -66,6 +66,15 @@ env_get() {
     bash -c 'set -a; . <(tr -d "\r" <"$1") >/dev/null 2>&1; printf "%s" "${!2-}"' _ "$1" "$2"
 }
 
+# Load the settings file once in a shell that stops at the first command
+# that fails. A value that lost its quotes runs part of itself as a command
+# and leaves its setting unset, which env_get alone would quietly read as "use
+# the default", and the default keep rules may keep less than yours.
+if [ -n "$SETTINGS_FILE" ]; then
+    bash -c 'set -e; set -a; . <(tr -d "\r" <"$1") >/dev/null' _ "$SETTINGS_FILE" \
+        || die "'$SETTINGS_FILE' did not load cleanly, at the error above. Correct it and run again."
+fi
+
 # Set VAR from the environment, else the settings file, else the default.
 setting() {
     local v="${!1-}"
