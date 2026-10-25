@@ -194,6 +194,10 @@ step "2/8  What to back up"
 setting VOLUMES_DIR "$(docker info -f '{{.DockerRootDir}}')/volumes"
 VOLUMES_DIR="${VOLUMES_DIR%/}"
 [ -d "$VOLUMES_DIR" ] || die "Volumes directory '$VOLUMES_DIR' does not exist. Set VOLUMES_DIR."
+# Docker's root is sometimes a symlink to another disk. The backup reads the
+# real directory, so the volumes are found, and excluded, by that path.
+linked_volumes="$VOLUMES_DIR"
+VOLUMES_DIR="$(readlink -f "$VOLUMES_DIR")"
 
 setting PROJECTS_DIR ""
 if [ -z "$PROJECTS_DIR" ]; then
@@ -220,6 +224,16 @@ fi
 setting EXTRA_DIRS ""
 setting SKIP_DIRS ""
 setting BORG_EXCLUDES "${VOLUMES_DIR}/backingFsBlockDev"
+# Excludes saved under the volumes directory's linked path move to its real
+# one. Only that leading path changes, so a pattern keeps its meaning.
+if [ "$linked_volumes" != "$VOLUMES_DIR" ]; then
+    moved=""
+    for x in $BORG_EXCLUDES; do
+        case "$x" in "$linked_volumes"|"$linked_volumes"/*) x="${VOLUMES_DIR}${x#"$linked_volumes"}" ;; esac
+        moved="${moved:+$moved }$x"
+    done
+    BORG_EXCLUDES="$moved"
+fi
 setting KEPT_VOLUMES ""
 setting LARGE_VOLUME_MB 1024
 [[ "$LARGE_VOLUME_MB" =~ ^[0-9]+$ ]] || die "LARGE_VOLUME_MB '$LARGE_VOLUME_MB' is not a whole number of megabytes."
@@ -629,16 +643,33 @@ set +a
 
 sources=()
 missing=()
-# shellcheck disable=SC2086
 # Borg stores a path given to it that is a symlink as the link itself, not
 # what it points to, so each path is resolved first and the target is what
-# gets backed up.
+# gets backed up. Each one that moved is remembered, as its path and then
+# its target, for the excludes below.
+links=()
+# shellcheck disable=SC2086
 for d in ${PROJECTS_DIR:-} "${VOLUMES_DIR:-/var/lib/docker/volumes}" ${EXTRA_DIRS:-}; do
-    if [ -e "$d" ]; then sources+=("$(readlink -f "$d")"); else missing+=("$d"); fi
+    if [ -e "$d" ]; then
+        real="$(readlink -f "$d")"
+        sources+=("$real")
+        if [ "$real" != "${d%/}" ]; then links+=("${d%/}" "$real"); fi
+    else
+        missing+=("$d")
+    fi
 done
 
+# An exclude written under a path that was a symlink would match nothing in
+# the archive, which holds the target, so its leading path moves with it.
+# Only that leading path changes, so a pattern keeps its meaning.
 exclude_args=()
 for x in ${BORG_EXCLUDES:-}; do
+    i=0
+    while [ "$i" -lt "${#links[@]}" ]; do
+        from="${links[$i]}"; to="${links[$((i + 1))]}"
+        case "$x" in "$from"|"$from"/*) x="${to}${x#"$from"}"; break ;; esac
+        i=$((i + 2))
+    done
     exclude_args+=(--exclude "$x")
 done
 
