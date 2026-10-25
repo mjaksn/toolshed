@@ -534,7 +534,8 @@ cat > "$new_script" <<'EOF'
 # All configuration lives in /etc/borg-backup.env. Edit that, not this.
 #
 # If the running containers cannot be listed, the run exits 2 before
-# stopping anything or backing anything up.
+# stopping anything or backing anything up. If any of them fails to stop, it
+# exits 2 without backing up, after starting again those that did stop.
 #
 # A path listed for backup that no longer exists is left out, the rest are
 # backed up, and the run then exits 2 so the failure shows. Borg's own exit
@@ -581,9 +582,14 @@ restart_containers() {
 }
 trap restart_containers EXIT
 
+# A container that would not stop may still be writing, so nothing is backed
+# up; the trap starts again whatever was stopped.
 if [ -n "$running" ]; then
     # shellcheck disable=SC2086
-    docker stop --time 30 $running >/dev/null
+    if ! docker stop --time 30 $running >/dev/null; then
+        echo "ERROR: not every container stopped; nothing was backed up." >&2
+        exit 2
+    fi
 fi
 
 borg create \

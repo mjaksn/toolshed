@@ -334,7 +334,9 @@ logs that and counts it as success, so the journal carries the warning but
 the run is not marked failed. Status 2 or more is an error, and is passed on.
 
 If the running containers cannot be listed, because Docker is not answering,
-the run exits 2 before stopping anything or backing anything up.
+the run exits 2 before stopping anything or backing anything up. If any
+container fails to stop, it may still be writing, so the run starts again
+those that did stop and exits 2 without backing up.
 
 Archives are named `<client>-<YYYY-MM-DDTHH:MM>`.
 
