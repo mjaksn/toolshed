@@ -389,7 +389,10 @@ BORG_EXCLUDES="/var/lib/docker/volumes/backingFsBlockDev /home/me/.esphome/.esph
 ```
 
 Excludes are paths, read as Borg's `fm:` patterns, and one that matches
-nothing is harmless. A path in `EXTRA_DIRS` must exist, as above.
+nothing is harmless. A path in `EXTRA_DIRS` must exist, as above. A path to
+back up that is a symlink is followed, since borg would otherwise store the
+link and not what it points to, and the archive holds it under the target's
+path; write any exclude inside it against the target too.
 
 To move a host to another server or repository, change the settings and run
 `setup.sh` again rather than editing `BORG_REPO` by hand, since the SSH

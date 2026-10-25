@@ -630,8 +630,11 @@ set +a
 sources=()
 missing=()
 # shellcheck disable=SC2086
+# Borg stores a path given to it that is a symlink as the link itself, not
+# what it points to, so each path is resolved first and the target is what
+# gets backed up.
 for d in ${PROJECTS_DIR:-} "${VOLUMES_DIR:-/var/lib/docker/volumes}" ${EXTRA_DIRS:-}; do
-    if [ -e "$d" ]; then sources+=("$d"); else missing+=("$d"); fi
+    if [ -e "$d" ]; then sources+=("$(readlink -f "$d")"); else missing+=("$d"); fi
 done
 
 exclude_args=()
