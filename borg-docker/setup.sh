@@ -547,8 +547,8 @@ cat > "$new_script" <<'EOF'
 #
 # All configuration lives in /etc/borg-backup.env. Edit that, not this.
 #
-# If the running containers cannot be listed, the run exits 2 before
-# stopping anything or backing anything up. If any of them fails to stop, it
+# If the env file does not load, or the running containers cannot be listed,
+# the run exits 2 before stopping anything or backing anything up. If any of them fails to stop, it
 # exits 2 without backing up, after starting again those that did stop. A
 container that fails to start again afterwards makes the run exit 2 as well.
 #
@@ -564,7 +564,14 @@ container that fails to start again afterwards makes the run exit 2 as well.
 set -uo pipefail
 # Paths are split on spaces below and never meant as patterns.
 set -o noglob
-set -a; . /etc/borg-backup.env; set +a
+# A settings file that will not load, or loads without a repository, would
+# leave the paths to back up wrong in ways nothing else here would notice.
+set -a
+if ! . /etc/borg-backup.env || [ -z "${BORG_REPO:-}" ]; then
+    echo "ERROR: /etc/borg-backup.env did not load cleanly; nothing was stopped or backed up." >&2
+    exit 2
+fi
+set +a
 
 sources=()
 missing=()

@@ -344,8 +344,9 @@ warning, usually a file that changed while it was being read; the script
 logs that and counts it as success, so the journal carries the warning but
 the run is not marked failed. Status 2 or more is an error, and is passed on.
 
-If the running containers cannot be listed, because Docker is not answering,
-the run exits 2 before stopping anything or backing anything up. If any
+If `/etc/borg-backup.env` does not load, say because a hand edit broke its
+quoting, or the running containers cannot be listed, because Docker is not
+answering, the run exits 2 before stopping anything or backing anything up. If any
 container fails to stop, it may still be writing, so the run starts again
 those that did stop and exits 2 without backing up. A container that fails
 to start again after the backup also fails the run, with Docker's error in
@@ -640,7 +641,7 @@ on Debian; if it complains, that package is what is missing.
 | `Cache, or information obtained from the security directory is newer than repository` | Usually after a prune on the server, or a repository restored from a snapshot. If you know why, `bb delete --cache-only` and run again; it rebuilds. |
 | The timer shows no next run | `sudo systemctl enable --now borg-backup.timer` |
 | The first backup after a prune is slow | Expected once, while the client rebuilds its chunk cache. |
-| `BORG_PASSCOMMAND is not set` in the journal | `/etc/borg-backup.env` was edited and a value lost its double quotes. Every value is quoted. |
+| `/etc/borg-backup.env did not load cleanly` in the journal | The file was edited and a value lost its double quotes, or `BORG_REPO` went missing. Every value is quoted; the error above that line names the bad one. Nothing was stopped. |
 
 ## Things you must not lose
 
