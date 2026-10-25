@@ -150,6 +150,64 @@ save_record() {
     return 1
 }
 
+# While a client's repository is being maintained, that client is shut out,
+# so it cannot delete an archive between the checks below and compact. Its
+# line comes out of the authorized_keys the container builds from the client
+# key files, sshd reads that file at every login, and the line goes back once
+# the client is done, or on any exit. Restarting the container rebuilds the
+# file from the key files too, so a client is never shut out for good.
+keys=/home/borg/.ssh/authorized_keys
+suspended=""
+
+resume_client() {
+    [ -n "$suspended" ] || return 0
+    if docker exec "$container" sh -c 'cat "$1.retention" > "$1" && rm -f "$1.retention"' _ "$keys"; then
+        suspended=""
+        return 0
+    fi
+    echo "   could not put ${suspended}'s key back; restart ${container} to rebuild it" >&2
+    return 1
+}
+
+# Shut the current client out, and make sure it has no session still open.
+# Fails, with the reason said, when the client should be skipped this run.
+suspend_client() {
+    local line n
+    [ "$dry_run" -eq 0 ] || return 0
+    line="command=\"cd /backup/${client};"
+    n="$(docker exec "$container" grep -c -F "$line" "$keys" 2>/dev/null)" || n=0
+    if [ "$n" != 1 ]; then
+        echo "   found ${n} key lines for ${client} in ${keys}, not 1; skipping this run."
+        echo "   If an earlier run was interrupted, restart ${container} to rebuild them."
+        rc=1
+        return 1
+    fi
+    if ! docker exec "$container" sh -c \
+        'cp -p "$1" "$1.retention" && { grep -v -F "$2" "$1.retention"; [ $? -le 1 ]; } > "$1"' \
+        _ "$keys" "$line"; then
+        echo "   could not take ${client}'s key out; skipping this run"
+        rc=1
+        return 1
+    fi
+    suspended="$client"
+    if docker exec "$container" sh -c 'for p in /proc/[0-9]*; do tr "\0" " " < "$p/cmdline" 2>/dev/null; echo; done' \
+        | grep -q -F -- "--restrict-to-path /backup/${client} "; then
+        echo "   ${client} has a session open (backup in progress?); skipping this run"
+        resume_client || rc=1
+        return 1
+    fi
+}
+
+on_exit() {
+    local status=$?
+    resume_client || status=1
+    exit "$status"
+}
+trap on_exit EXIT
+# Turned into ordinary exits, so that the EXIT trap runs for them too.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
 # Repositories nobody will prune, said once so they are not forgotten.
 for dir in "$repo_base"/*/; do
     client="$(basename "$dir")"
@@ -178,12 +236,14 @@ for passfile in "${passfiles[@]}"; do
         echo "   repo is locked (backup in progress?); skipping this run"
         continue
     fi
+    suspend_client || continue
 
     pass="$(cat "$passfile")"
     record="${RETENTION_PASSDIR}/${client}.archives"
     if ! now="$(archives)"; then
         echo "   could not list the archives; skipping this run"
         rc=1
+        resume_client || rc=1
         continue
     fi
 
@@ -200,6 +260,7 @@ for passfile in "${passfiles[@]}"; do
             echo "   they can still be recovered; see Retention in the README. If you"
             echo "   deleted them yourself, remove ${record} and run again."
             rc=1
+            resume_client || rc=1
             continue
         fi
     else
@@ -211,12 +272,11 @@ for passfile in "${passfiles[@]}"; do
         --glob-archives "${client}-*" "$repo" 2>&1)" || { prune_ok=0; rc=1; }
     printf '%s\n' "$prune_out"
 
-    # Borg holds its lock only for the length of each command, so a client
-    # can delete an archive between the check above and compact below. The
-    # archives are listed again just before compacting, and anything gone
-    # that prune did not report pruning stops it. That leaves the moment
-    # between this listing and compact taking its lock, and a deletion there
-    # is reported after compact rather than prevented.
+    # The client is shut out, so nothing should change between the check
+    # above and compact below. The archives are still listed again before
+    # compacting, and anything gone that prune did not report pruning stops
+    # it, and again after, in case shutting the client out ever fails to
+    # hold.
     if [ "$dry_run" -eq 0 ]; then
         pruned="$(grep '^Pruning archive' <<<"$prune_out" | grep -o '\[[0-9a-f]\{64\}\]' | tr -d '[]' | LC_ALL=C sort || true)"
         if ! after="$(archives)"; then
@@ -258,6 +318,8 @@ for passfile in "${passfiles[@]}"; do
             fi
         fi
     fi
+
+    resume_client || rc=1
 
     docker exec -u borg "$container" borg check --repository-only "$repo" || rc=1
 

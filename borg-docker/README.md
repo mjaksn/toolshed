@@ -452,13 +452,23 @@ the deletion, following the append-only section of Borg's documentation for
 to do it.
 
 Borg holds its lock only for the length of each command, so a client could
-also delete an archive while `retention.sh` is running. The archives are
-listed again after prune, and one gone that prune did not report removing
-stops the compact in the same way. That leaves the moment between that
-listing and compact taking its lock: a deletion there cannot be stopped,
-but it is reported once compact has run, and the record keeps the archive,
-so the next run reports it again. Running retention outside the clients'
-backup window keeps that moment as quiet as it can be.
+otherwise delete an archive while `retention.sh` is running. To stop that,
+each client is shut out while its repository is maintained: its line comes
+out of the `authorized_keys` file the container builds from the key files,
+the script checks that it has no session still open, and the line goes back
+once that client is done, or when the script exits for any reason short of
+being killed outright. A client with a session open, which usually means a
+backup in progress, is skipped for that run. A backup that tries to start
+while its client is shut out fails and says so in that client's journal,
+which is one more reason to run retention well clear of the backup window.
+If the script is ever killed outright, restarting the container rebuilds
+the file from the key files, and the next run says so if it finds a line
+missing.
+
+As a second line of defence, the archives are listed again after prune, and
+one gone that prune did not report removing stops the compact in the same
+way; they are listed once more after compacting, and a loss found there is
+reported and kept in the record, so the next run reports it again.
 
 The first run for each client has no record to compare with, and says so.
 A dry run compares and reports but never writes the record.
