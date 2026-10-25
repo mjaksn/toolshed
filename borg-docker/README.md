@@ -76,8 +76,12 @@ again in an `EXIT` trap, so they come back even if borg fails.
   data cost almost nothing after the first. Chunks are shared between
   archives.
 - **Encryption at rest.** Repositories use `repokey-blake2`: the key lives in
-  the repository, protected by a passphrase only the client and you hold. The
-  server never sees plaintext.
+  the repository, protected by a passphrase. What is on the server's disks
+  is encrypted, and anyone with only those files sees encrypted chunks.
+  The server itself is trusted, though: `retention.sh` keeps each client's
+  passphrase there to prune and to check the data, and decrypts it there to
+  do so, so root on the server can read the backups. See
+  [Passphrases](#passphrases) for why it is arranged that way.
 - **Append-only.** The server runs `borg serve --append-only` for every
   client key. A compromised client, or ransomware on one, can add archives,
   and can remove archives from the list a repository shows, but cannot
@@ -93,7 +97,7 @@ again in an `EXIT` trap, so they come back even if borg fails.
 | Who | Can do |
 | --- | --- |
 | A client's key | Create archives in its own repository, and read it. It can also drop archives from the repository's list, but their data stays on disk, and `retention.sh` notices and stops before compacting it away. Nothing else. |
-| Root on the server | Everything, through `docker exec` into the container: prune, compact, check, delete. Reading what is inside an archive also needs that client's passphrase. |
+| Root on the server | Everything, through `docker exec` into the container: prune, compact, check, delete, and read what is inside an archive, using the passphrases `retention.sh` keeps there. |
 | Anyone with the backup files but no passphrase | Sees encrypted chunks only. |
 
 ### What is deliberately not done
