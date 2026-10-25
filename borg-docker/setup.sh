@@ -592,9 +592,10 @@ cat > "$new_script" <<'EOF'
 # All configuration lives in /etc/borg-backup.env. Edit that, not this.
 #
 # If the env file does not load, or the running containers cannot be listed,
-# the run exits 2 before stopping anything or backing anything up. If any of them fails to stop, it
-# exits 2 without backing up, after starting again those that did stop. A
-container that fails to start again afterwards makes the run exit 2 as well.
+# the run exits 2 before stopping anything or backing anything up. If any of
+# them fails to stop, it exits 2 without backing up, after starting again
+# those that did stop. A container that fails to start again afterwards makes
+# the run exit 2 as well.
 #
 # A path listed for backup that no longer exists is left out, the rest are
 # backed up, and the run then exits 2 so the failure shows. Borg's own exit
