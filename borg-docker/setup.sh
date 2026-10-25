@@ -611,8 +611,11 @@ set -uo pipefail
 set -o noglob
 # A settings file that will not load, or loads without a repository, would
 # leave the paths to back up wrong in ways nothing else here would notice.
+# Sourcing reports only its last command's status, so the file is first
+# loaded in a shell that stops at the first command to fail.
 set -a
-if ! . /etc/borg-backup.env || [ -z "${BORG_REPO:-}" ]; then
+if ! bash -ec 'set -a; . /etc/borg-backup.env' >/dev/null \
+    || ! . /etc/borg-backup.env || [ -z "${BORG_REPO:-}" ]; then
     echo "ERROR: /etc/borg-backup.env did not load cleanly; nothing was stopped or backed up." >&2
     exit 2
 fi
