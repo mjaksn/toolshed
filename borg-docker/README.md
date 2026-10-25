@@ -333,6 +333,9 @@ warning, usually a file that changed while it was being read; the script
 logs that and counts it as success, so the journal carries the warning but
 the run is not marked failed. Status 2 or more is an error, and is passed on.
 
+If the running containers cannot be listed, because Docker is not answering,
+the run exits 2 before stopping anything or backing anything up.
+
 Archives are named `<client>-<YYYY-MM-DDTHH:MM>`.
 
 ### Changing what is backed up

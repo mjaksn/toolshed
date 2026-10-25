@@ -533,6 +533,9 @@ cat > "$new_script" <<'EOF'
 #
 # All configuration lives in /etc/borg-backup.env. Edit that, not this.
 #
+# If the running containers cannot be listed, the run exits 2 before
+# stopping anything or backing anything up.
+#
 # A path listed for backup that no longer exists is left out, the rest are
 # backed up, and the run then exits 2 so the failure shows. Borg's own exit
 # status 1 means the archive was written with a warning, usually a file that
@@ -562,7 +565,13 @@ done
 prefix="${CLIENT_NAME:-}"
 [ -n "$prefix" ] || prefix='{hostname}'
 
-running="$(docker ps -q | tr '\n' ' ')"
+# Without the list of running containers nothing can be stopped, and a backup
+# of live databases is worse than none, so a failure here ends the run.
+if ! running="$(docker ps -q)"; then
+    echo "ERROR: could not list the running containers; nothing was stopped or backed up." >&2
+    exit 2
+fi
+running="$(tr '\n' ' ' <<<"$running")"
 
 restart_containers() {
     if [ -n "$running" ]; then
