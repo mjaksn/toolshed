@@ -173,6 +173,12 @@ and the custom schedule `0 5 * * 1-6`, Monday to Saturday at 05:00. It only
 checks and updates each client's record of its archives, so that one made
 and deleted again during the week is noticed; the README explains why.
 
+User Scripts keeps each run's output but tells no one when a run fails. To
+hear about a failed or skipped run, put a curl config file holding a webhook
+URL in the root-only directory, as `/mnt/user/borg/.retention/report.curl`
+with mode 600, and set `REPORT_CURL` to it in `borg-docker.env`; see
+Reporting the outcome in the README. Neither script body changes.
+
 ## Rolling back
 
 The container holds no state of its own. Remove it and recreate it from the

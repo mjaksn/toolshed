@@ -228,6 +228,7 @@ without the third.
 | `RETENTION_PASSDIR` | none, required | `retention.sh` only: the directory of `<client>.pass` files |
 | `RETENTION_KEEP` | `--keep-daily 14 --keep-weekly 8 --keep-monthly 6` | `retention.sh` only: the prune rules |
 | `RETENTION_VERIFY` | `data` | `retention.sh` only: how each archive is checked before pruning, `data` reading every chunk back or `archives` checking only that each is there |
+| `REPORT_CURL` | none | `retention.sh` only: a curl config file holding the URL that each run's outcome is posted to; see [Reporting the outcome](#reporting-the-outcome) |
 
 The per host settings, `CLIENT_NAME` and everything from `PROJECTS_DIR` to
 `LARGE_VOLUME_MB`, are remembered on each host after its first run, so they
@@ -458,9 +459,11 @@ week, `RETENTION_VERIFY="archives"` checks only that every chunk an archive
 needs is there, which catches a deleted chunk but not an overwritten one. It finds the
 repositories through the container's `/backup` mount, skips any that is
 locked because a backup is running, does not compact after a prune that
-failed, and exits non-zero if any step failed for any client. Only one run
-at a time is allowed, through a lock on `.retention.lock` in
-`RETENTION_PASSDIR`, which needs `flock` from util-linux on the server.
+failed, and exits 1 if any step failed for any client. When nothing failed
+but a client was skipped, it exits 3, so a schedule can tell that a
+repository went unchecked. Only one run at a time is allowed, through a lock
+on `.retention.lock` in `RETENTION_PASSDIR`, which needs `flock` from
+util-linux on the server.
 
 ### Archives that disappear
 
@@ -498,7 +501,7 @@ once that client is done, or when the script exits for any reason short of
 being killed outright. Taking a key out stops new logins but not a
 connection already made, and which client a connection belongs to cannot be
 told from the server, so while any SSH session of the `borg` user is open,
-usually a backup in progress, each client is skipped for that run. A backup that tries to start
+usually a backup in progress, each client is skipped for that run, and the run exits 3. A backup that tries to start
 while its client is shut out fails and says so in that client's journal,
 which is one more reason to run retention well clear of the backup window.
 If the script is ever killed outright, restarting the container rebuilds
@@ -576,6 +579,29 @@ the rules.
 The next backup on each client notices the repository changed under it and
 rebuilds its local chunk cache. That one run takes longer and logs a cache
 message; nothing needs doing.
+
+### Reporting the outcome
+
+With `REPORT_CURL` set, every run but a dry run posts its outcome as JSON as
+it exits, including a run that stops early because the container is not
+running:
+
+```json
+{"host":"server","job":"retention","mode":"record","result":"skipped","exit_status":3,"skipped_clients":["myhost"]}
+```
+
+`mode` is `record` or `full`, and `result` is `success`, `skipped` or
+`failed`, following the exit status. `REPORT_CURL` names a curl config file
+holding the URL, kept readable by root only, so that the URL, often the only
+secret a webhook has, never appears on a command line:
+
+```
+url = "http://homeassistant.lan:8123/api/webhook/<id>"
+```
+
+A Home Assistant webhook trigger is one consumer; anything that takes a JSON
+POST will do. The post is tried four times in all, and one that still fails
+is said in the output and never changes the exit status.
 
 ### A deeper check
 
