@@ -614,6 +614,9 @@ bb() { sudo bash -c 'set -a; . /etc/borg-backup.env; set +a; exec borg "$@"' bb 
 | Task | Command |
 | --- | --- |
 | List archives | `bb list` |
+| The newest archive | `bb list --last 1` |
+| Its size, and when it started and ended | `bb info --last 1` |
+| The newest archive, from the journal | `sudo journalctl -u borg-backup.service -o short-iso --no-pager \| grep 'Archive name' \| tail -1` |
 | Repository size and stats | `bb info` |
 | Files in an archive | `bb list ::<archive>` |
 | Only the directories | `bb list ::<archive> --short \| sed 's\|/[^/]*$\|\|' \| sort -u` |
@@ -627,6 +630,14 @@ bb() { sudo bash -c 'set -a; . /etc/borg-backup.env; set +a; exec borg "$@"' bb 
 | What a backup would take | `bb create --dry-run --list ::test <the paths from the env file>` |
 
 `::` on its own means the repository in `BORG_REPO`.
+
+`bb list --last 1` asks the repository, so it is the authoritative answer to
+when this client last backed up. The journal line needs no passphrase, and no
+sudo for a member of `adm` or `systemd-journal`, but it only reaches back as
+far as the journal is kept. A run logs `Archive name:` whenever borg writes an
+archive, even when the run is then marked failed, for instance over a path
+that no longer exists, so check the run's own result with `systemctl status
+borg-backup.service` as well.
 
 On the server, borg inside the container reaches every repository directly.
 Repository-level commands need no passphrase; anything that reads archive
