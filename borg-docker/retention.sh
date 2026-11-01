@@ -16,6 +16,11 @@
 # <client>.archives, and a client with an archive gone since then that this
 # script did not prune is reported and left alone too, since compacting would
 # make the loss final.
+# A client whose repository is locked, or that might have a session open, is
+# skipped without counting as a failure, but the run then exits 3 rather than
+# 0, so a schedule can tell that some repository went unchecked. With
+# REPORT_CURL set, the outcome is also posted as JSON to the URL in that curl
+# config file, for Home Assistant or anything else that takes a webhook.
 # Each setting is taken from the environment, else the settings file (--env
 # FILE, else borg-docker.env beside this script), else the default.
 #
@@ -36,6 +41,10 @@ container. Run it as root on the machine the container runs on.
   --record     only check each client's archives against its record and
                update the record; prune, compact and shut out nothing
   -h, --help   print this help
+
+Exits 0 when every client was done, 3 when some were skipped because a
+backup seemed to be in progress and nothing failed, and 1 when anything
+failed.
 EOF
 }
 
@@ -92,6 +101,42 @@ setting RETENTION_PASSDIR ""
 setting RETENTION_KEEP "--keep-daily 14 --keep-weekly 8 --keep-monthly 6"
 setting RETENTION_VERIFY data
 setting REPO_NAME containers
+setting REPORT_CURL ""
+
+if [ -n "$REPORT_CURL" ]; then
+    [ -r "$REPORT_CURL" ] || die "REPORT_CURL '$REPORT_CURL' is not a readable file."
+    command -v curl >/dev/null || die "REPORT_CURL is set, and curl is needed to post the report."
+fi
+
+# Clients skipped because a backup seemed to be in progress.
+skipped=()
+
+# Post the run's outcome, as JSON, to the URL in the curl config file that
+# REPORT_CURL names. The URL stays in that root-only file and never reaches a
+# command line in the process list. A dry run posts nothing, and a post that
+# fails is said and never changes the exit status.
+report() {
+    local status="$1" mode=full result names="" c
+    [ -n "$REPORT_CURL" ] && [ "$dry_run" -eq 0 ] || return 0
+    [ "$record_only" -eq 0 ] || mode=record
+    case "$status" in
+        0) result=success ;;
+        3) result=skipped ;;
+        *) result=failed ;;
+    esac
+    for c in "${skipped[@]}"; do
+        c="${c//\\/\\\\}"
+        names="${names:+${names},}\"${c//\"/\\\"}\""
+    done
+    printf '{"host":"%s","job":"retention","mode":"%s","result":"%s","exit_status":%s,"skipped_clients":[%s]}' \
+        "$(hostname -s)" "$mode" "$result" "$status" "$names" |
+        curl -sS --fail --max-time 10 --retry 3 --retry-all-errors -o /dev/null \
+            -K "$REPORT_CURL" -H 'Content-Type: application/json' --data-binary @- \
+        || echo "Could not post the outcome to the URL in ${REPORT_CURL}." >&2
+}
+# Until the full exit handler is set further down, an early exit still
+# reports, so a container that is down is heard about, not just missed.
+trap 'report "$?"' EXIT
 
 [ "$(id -u)" -eq 0 ] || die "Run as root."
 [ -n "$RETENTION_PASSDIR" ] || die "Set RETENTION_PASSDIR to the directory holding <client>.pass files."
@@ -278,6 +323,7 @@ suspend_client() {
     # server should be quiet, so normally there is none.
     if grep -q -E -e '^sshd(-session)?: borg([@ ]|$)' -e 'borg serve' <<<"$procs"; then
         echo "   an SSH session to ${container} is open (a backup in progress?); skipping ${client} this run"
+        skipped+=("$client")
         resume_client || rc=1
         return 1
     fi
@@ -286,6 +332,7 @@ suspend_client() {
 on_exit() {
     local status=$?
     resume_client || status=1
+    report "$status"
     exit "$status"
 }
 trap on_exit EXIT
@@ -319,6 +366,7 @@ for passfile in "${passfiles[@]}"; do
     # Refuse to touch a repository a client is writing to.
     if [ -e "${host_repo}/lock.exclusive" ]; then
         echo "   repo is locked (backup in progress?); skipping this run"
+        skipped+=("$client")
         continue
     fi
     suspend_client || continue
@@ -440,4 +488,11 @@ for passfile in "${passfiles[@]}"; do
 
     echo "   on disk: $(du -sh "$host_repo" | cut -f1)"
 done
+
+# A skipped client is not a failure, but a clean exit would hide that its
+# repository went a day unchecked.
+if [ "$rc" -eq 0 ] && [ "${#skipped[@]}" -gt 0 ]; then
+    echo "Skipped this run, a backup seemed to be in progress: ${skipped[*]}"
+    rc=3
+fi
 exit $rc
