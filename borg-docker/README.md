@@ -386,6 +386,76 @@ default four hours; set `BACKUP_TIMEOUT_MIN` higher in
 
 Archives are named `<client>-<YYYY-MM-DDTHH:MM>`.
 
+### Reporting each run
+
+A failed run is marked failed on the timer and explained in the journal, and
+nothing tells anyone. To hear about it, add a reporter that systemd runs after
+every backup, whatever the outcome, and that posts the result as JSON to a
+webhook. `setup.sh` does not install one. It rewrites only the service and
+timer files, never the `borg-backup.service.d` directory, so a drop-in added
+there survives running it again.
+
+The URL goes in a curl config file readable by root only,
+`/etc/borg-report.curl`, so that it never appears on a command line:
+
+```
+url = "http://homeassistant.lan:8123/api/webhook/<id>"
+```
+
+The reporter, `/usr/local/sbin/borg-report.sh`, mode 750:
+
+```bash
+#!/bin/bash
+# Posts the outcome of borg-backup.service to a webhook. systemd runs it
+# as ExecStopPost and sets SERVICE_RESULT and EXIT_STATUS. Never fails the unit.
+[ -r /etc/borg-report.curl ] || exit 0
+info=$(timeout 60 bash -c 'set -a; . /etc/borg-backup.env; set +a; borg info --last 1 --json' 2>/dev/null) || info=
+case "$info" in '{'*) ;; *) info=null ;; esac
+printf '{"host":"%s","job":"borg","result":"%s","exit_status":"%s","info":%s}' \
+    "$(hostname -s)" "${SERVICE_RESULT:-unknown}" "${EXIT_STATUS:-}" "$info" |
+    curl -sS --fail --max-time 10 --retry 3 --retry-all-errors -o /dev/null \
+        -K /etc/borg-report.curl -H 'Content-Type: application/json' --data-binary @-
+exit 0
+```
+
+And the drop-in, `/etc/systemd/system/borg-backup.service.d/report.conf`,
+followed by `sudo systemctl daemon-reload`:
+
+```ini
+[Service]
+ExecStopPost=-/usr/local/sbin/borg-report.sh
+TimeoutStopSec=150
+```
+
+systemd runs `ExecStopPost` however the run ends, after the backup script's
+exit trap has started the containers again. The leading `-` means a reporter
+that fails can never mark the backup failed, and the script exits 0 in any
+case. `TimeoutStopSec` bounds `ExecStopPost`, at 90 seconds by default; the
+reporter can need about 110, 60 for `borg info` and four tries of up to 10
+seconds with the pauses between them, hence 150. Until the curl file exists
+the reporter does nothing.
+
+A report, trimmed, since borg's JSON carries more:
+
+```json
+{"host":"myhost","job":"borg","result":"success","exit_status":"0","info":{"archives":[{"name":"myhost-2026-11-01T03:31","duration":17.6,"stats":{"deduplicated_size":3076980,"nfiles":47645}}]}}
+```
+
+`result` is systemd's `SERVICE_RESULT`: `success`, or the reason the run
+failed, such as `exit-code`, `signal` or `timeout`. `exit_status` is a string,
+because after a signal systemd gives the signal's name rather than a number.
+`info` is the output of `borg info --last 1 --json`, the newest archive in the
+repository with its stats; after a failure, that is an earlier run's archive.
+When the server cannot be reached, or borg prints anything but JSON, `info` is
+`null`, so the report still parses. Fetching it opens a second, read-only
+session to the server once the backup has finished.
+
+To try it, run a backup with `sudo systemctl start borg-backup.service`, then
+check `systemctl show borg-backup.service -p ExecStopPost`, which shows the
+reporter's exit status, and the journal, which shows any error from curl. The
+server's retention runs can report the same way; see Reporting the outcome
+under Retention.
+
 ### Changing what is backed up
 
 Edit `/etc/borg-backup.env`. The next backup reads it; nothing needs running
@@ -423,6 +493,13 @@ On the client:
 ```
 sudo systemctl disable --now borg-backup.timer
 sudo rm /etc/systemd/system/borg-backup.{service,timer} /usr/local/sbin/borg-backup.sh /etc/borg-backup.env
+sudo systemctl daemon-reload
+```
+
+If the client had a reporter, remove it as well and reload once more:
+
+```
+sudo rm -r /etc/systemd/system/borg-backup.service.d /usr/local/sbin/borg-report.sh /etc/borg-report.curl
 sudo systemctl daemon-reload
 ```
 
@@ -601,7 +678,8 @@ url = "http://homeassistant.lan:8123/api/webhook/<id>"
 
 A Home Assistant webhook trigger is one consumer; anything that takes a JSON
 POST will do. The post is tried four times in all, and one that still fails
-is said in the output and never changes the exit status.
+is said in the output and never changes the exit status. Each client can
+report its own backups the same way; see Reporting each run.
 
 ### A deeper check
 
