@@ -35,10 +35,15 @@ address, so this sits in between.
 - Python 3.10 or later and nothing else. It runs anywhere Python does.
 - LAN Control turned on for the lamp in the Yeelight app. A lamp that answers
   `--discover` has it on.
-- One controller on the lamp's UDP session at a time. The yeelight-cube-lite
-  integration uses the same session, and the lamp can freeze when two talk to
-  it at once, so stop that integration before starting this, or the other way
-  round. Home Assistant's Matter integration is a different path, and can stay.
+- One controller on the lamp's UDP session at a time. Opening a second
+  session while one is streaming froze the lamp's display in testing, until it
+  was power-cycled. That rules out running the yeelight-cube-lite integration
+  alongside this, and `--test` while the bridge is streaming. Home Assistant's
+  Matter integration is a different path, and can stay.
+- A power supply that keeps up. The lamp draws up to about 6 W on a bright
+  picture, and the yeelight-cube-lite integration recommends a 12 W port. On a
+  laptop's USB port it ran dim and dropped off the network, and a long, thin
+  cable from a good adapter was not much better; a short, sturdy one is.
 
 ## Setting it up
 
@@ -60,8 +65,9 @@ Check which way up frames arrive:
 python cube_lite_ddp.py 192.168.1.40 --test
 ```
 
-The top row should turn red and the bottom row magenta, with a white column
-at the left edge. If it does, what LedFx draws at its top left appears at the
+Do this before starting the bridge, not while it streams: `--test` opens a
+session of its own. The top row should turn red and the bottom row magenta,
+with a white column at the left edge. If it does, what LedFx draws at its top left appears at the
 lamp's top left. If not, see `--origin` below.
 
 Start the bridge, as at the top, and leave it running. Then in LedFx:
@@ -97,19 +103,22 @@ rather than anything here.
 - Sends the lamp nothing faster than 30 datagrams a second, which is as fast
   as the lamp answers reliably. A frame that arrives before the last one has
   gone replaces it, so the lamp is never behind.
-- Checks the session is alive with a keep-alive after 20 seconds without
-  hearing from the lamp, because frames are never answered and a dead session
-  looks the same as a live one. When the lamp has dropped it, a new one is
-  opened.
-- Opens a fresh session when frames start again after a pause of more than
-  10 seconds, because the lamp leaves direct mode the moment its app or Home
-  Assistant tells it to do something else.
-- When the lamp stops answering, sends the frame again at once from a new
-  socket. The lamp can stop answering one client socket altogether while it
-  answers a new one straight away, and in a stream it has done so within two
-  minutes. If the new socket gets no answer either, says so once, drops frames,
-  tries again every 5 seconds, each time from a new socket, and says when the
-  lamp is back.
+- Sends a keep-alive into the session every 30 seconds while frames flow,
+  without waiting for its answer. The lamp ends a session about two minutes
+  after its last keep-alive, and frames do not count.
+- Keeps the session however quiet the lamp goes. Over Wi-Fi its answers can be
+  held up for seconds, and opening a second session to replace one that is
+  only slow is what froze the lamp in testing. After 90 seconds without a word
+  from the lamp it says so, and says again when the lamp answers.
+- Opens a new session only when the lamp refuses the old one, which it does
+  cleanly, by answering anything sent in it with an error, or when frames start
+  again after a pause of more than 150 seconds, by when the old one has
+  certainly expired. The new session turns direct mode on afresh, in case the
+  lamp's app or Home Assistant gave the lamp something else to show meanwhile.
+- When the lamp does not open a session at all, says so once, drops frames,
+  tries again every 5 seconds, and says when the lamp is back.
+- When the lamp's display freezes anyway, which is what a weak power supply
+  does, nothing sent over the network brings it back: power-cycle the lamp.
 
 The lamp keeps showing the last frame after the bridge stops, until it is
 given something else to show from its app or Home Assistant.
@@ -153,14 +162,15 @@ They cover:
 - frames sent faster than the lamp takes them, held to its rate with the
   newest shown;
 - a stream carried in one session;
-- a session the lamp has dropped, found by the keep-alive or by a refused
+- keep-alives sent while frames flow;
+- a session the lamp has ended, found by a refused keep-alive or a refused
   frame, and a new one opened with direct mode on again;
+- a lamp that stops answering keep-alives, or never confirms direct mode,
+  keeping its one session, with a warning;
 - a fresh session after a pause;
-- a lamp that stops answering the bridge's socket, and is answered from a
-  new one without a pause;
-- a lamp that stops answering and comes back;
+- a lamp that opens no session, tried again until it does;
 - the frame fitting in one of the lamp's datagrams, and the test pattern;
 - `--test` against a lamp and against no lamp, a port in use, and no lamp
   address given.
 
-They take about eight seconds.
+They take about nine seconds.

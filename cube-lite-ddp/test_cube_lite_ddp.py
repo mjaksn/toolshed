@@ -40,9 +40,9 @@ class FakeLamp(threading.Thread):
         # on in its session, the decoded pixel bytes).
         self.frames: list[tuple[float, str, bool, bytes]] = []
         self.silent = False
-        # Client ports the lamp has stopped answering, and ignores entirely,
-        # while it still answers every other.
-        self.ignored_ports: set[int] = set()
+        # Methods the lamp acts on but never answers, as when an answer is
+        # lost on the way.
+        self.unanswered: set[str] = set()
         self._halt = threading.Event()
 
     def stop(self) -> None:
@@ -65,9 +65,11 @@ class FakeLamp(threading.Thread):
             for line in data.splitlines():
                 message = json.loads(line)
                 with self.lock:
-                    if self.silent or peer[1] in self.ignored_ports:
+                    if self.silent:
                         continue
                     reply = self._handle(message)
+                    if message.get("method") in self.unanswered:
+                        reply = None
                 if reply is not None:
                     self.sock.sendto(json.dumps(reply).encode() + b"\r\n", peer)
 
@@ -237,17 +239,33 @@ class BottomLeftTest(BridgeTest):
 
 
 class SessionTest(BridgeTest):
-    def test_dropped_session_found_by_keep_alive_is_reopened(self):
-        with mock.patch.object(cube, "CONFIRM_AFTER", 0.2):
+    def stream(self, seconds: float, frame: bytes | None = None) -> None:
+        """LedFx's side: frames every 50 ms for a while."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            self.send(ddp(frame or rows_frame(ROW_COLOURS)))
+            time.sleep(0.05)
+
+    def test_keep_alives_go_out_while_frames_flow(self):
+        with mock.patch.object(cube, "KEEP_ALIVE_EVERY", 0.2):
+            self.stream(0.7)
+            self.shown(3)
+        self.assertGreaterEqual(self.fake.methods.count("udp_sess_keep_alive"), 2)
+        self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+
+    def test_expired_session_refused_at_keep_alive_is_reopened(self):
+        with mock.patch.object(cube, "KEEP_ALIVE_EVERY", 0.2):
             self.send(ddp(rows_frame(ROW_COLOURS)))
             first = self.shown(1)[0][1]
             self.fake.forget_tokens()
-            time.sleep(0.3)
-            self.send(ddp(rows_frame(ROW_COLOURS)))
-            _, token, direct, _ = self.shown(2)[1]
-        self.assertNotEqual(token, first)
+            later = rows_frame([(5, 5, 5)] * cube.ROWS)
+            end = time.monotonic() + 3
+            while time.monotonic() < end and not any(f[1] != first for f in self.fake.frames):
+                self.send(ddp(later))
+                time.sleep(0.05)
+            _, _, direct, pixels = next(f for f in self.fake.frames if f[1] != first)
         self.assertTrue(direct, "direct mode not turned on in the new session")
-        self.assertIn("udp_sess_keep_alive", self.fake.methods)
+        self.assertEqual(pixels, later)
         self.assertEqual(self.fake.methods.count("udp_sess_new"), 2)
 
     def test_refused_frame_makes_the_next_open_a_session(self):
@@ -262,24 +280,33 @@ class SessionTest(BridgeTest):
         self.assertTrue(direct)
         self.assertEqual(self.fake.methods.count("udp_sess_new"), 2)
 
-    def test_lamp_ignoring_the_socket_is_left_for_a_new_one(self):
-        with mock.patch.object(cube, "CONFIRM_AFTER", 0.2), mock.patch.object(cube, "REPLY_TIMEOUT", 0.05):
-            self.send(ddp(rows_frame(ROW_COLOURS)))
-            first = self.shown(1)[0][1]
-            old_port = self.lamp.sock.getsockname()[1]
-            with self.fake.lock:
-                self.fake.ignored_ports.add(old_port)
-            time.sleep(0.3)
-            # The keep-alive goes unanswered; the same frame is sent again at
-            # once from a new socket, without waiting for the retry.
-            latest = rows_frame([(3, 3, 3)] * cube.ROWS)
-            self.send(ddp(latest))
-            _, token, direct, pixels = self.shown(2)[1]
-        self.assertNotEqual(self.lamp.sock.getsockname()[1], old_port)
-        self.assertNotEqual(token, first)
-        self.assertTrue(direct)
-        self.assertEqual(pixels, latest)
+    def test_quiet_lamp_keeps_its_session(self):
+        # Keep-alives go unanswered, as over a stalled Wi-Fi link. Opening a
+        # second session then is what froze the real lamp, so the bridge keeps
+        # streaming into the one it has, and says the lamp is quiet.
+        with self.fake.lock:
+            self.fake.unanswered.add("udp_sess_keep_alive")
+        with mock.patch.object(cube, "KEEP_ALIVE_EVERY", 0.1), \
+                mock.patch.object(cube, "SILENT_WARN_AFTER", 0.3), \
+                self.assertLogs("cube_lite_ddp", "WARNING") as logs:
+            self.stream(0.8)
+            self.assertTrue(wait_for(lambda: self.lamp._silent))
+        self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+        self.assertEqual(len({f[1] for f in self.shown(5)}), 1)
+        self.assertIn("has not answered", "\n".join(logs.output))
         self.assertFalse(self.bridge._failing)
+
+    def test_unconfirmed_direct_mode_keeps_the_session(self):
+        with self.fake.lock:
+            self.fake.unanswered.add("activate_fx_mode")
+        with mock.patch.object(cube, "REPLY_TIMEOUT", 0.05), \
+                self.assertLogs("cube_lite_ddp", "WARNING") as logs:
+            self.stream(0.6)
+            shown = self.shown(3)
+        self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+        self.assertEqual(len({f[1] for f in shown}), 1)
+        self.assertTrue(all(direct for _, _, direct, _ in shown))
+        self.assertIn("did not confirm direct mode", "\n".join(logs.output))
 
     def test_stream_after_a_pause_opens_a_fresh_session(self):
         with mock.patch.object(cube, "RESTART_AFTER", 0.2):
@@ -290,7 +317,7 @@ class SessionTest(BridgeTest):
             second = self.shown(2)[1][1]
         self.assertNotEqual(first, second)
 
-    def test_silent_lamp_is_retried_and_frames_resume(self):
+    def test_lamp_that_opens_no_session_is_retried_and_frames_resume(self):
         with mock.patch.object(cube, "RETRY_AFTER", 0.3), mock.patch.object(cube, "REPLY_TIMEOUT", 0.05), \
                 mock.patch.object(cube, "HANDSHAKE_TIMEOUT", 0.05):
             with self.fake.lock:

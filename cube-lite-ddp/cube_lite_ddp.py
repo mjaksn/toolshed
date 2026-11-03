@@ -19,11 +19,16 @@ Assistant integration, which takes a whole frame of pixels at a time and up to
   for that session only;
 - ``update_leds`` carries a frame as base64 of the R, G, B bytes of its 100
   pixels, row by row from the bottom left, and is never answered;
-- a token the lamp no longer knows is refused with error code -1, and a new
-  session has to be opened, and direct mode turned on again in it;
-- the lamp can stop answering one client socket altogether, while it answers
-  a new one at once, so a session is opened again from a fresh socket when the
-  lamp goes quiet.
+- a session lasts about two minutes after its last ``udp_sess_keep_alive``,
+  frames not counting, and after that every datagram in it, frames included, is
+  refused with error code -1, so a new session has to be opened, and direct
+  mode turned on again in it;
+- opening a second session and turning direct mode on in it while another is
+  still alive froze the lamp's display in testing: it went on answering
+  handshakes and keep-alives but no command, and showed no frame, until it was
+  power-cycled. So a session is never given up because the lamp is quiet,
+  which over Wi-Fi it can be for seconds at a time, only when the lamp refuses
+  it, or when it has certainly expired.
 """
 
 from __future__ import annotations
@@ -58,25 +63,31 @@ LAMP_PORT = 55444
 MIN_SEND_INTERVAL = 1 / 30
 # The lamp drops a datagram bigger than this. A frame is about 480 bytes.
 MAX_DATAGRAM = 760
-# One wait for an answer. The lamp usually answers in a few milliseconds, but
-# Wi-Fi can hold one up for nearly 200. A command is sent up to ATTEMPTS times,
-# which is harmless, as every command here sets something absolutely.
-REPLY_TIMEOUT = 0.3
-HANDSHAKE_TIMEOUT = 0.6
+# How long to wait for the answer to the commands that set a session up.
+# Over Wi-Fi the lamp usually answers in a few milliseconds, but its answers
+# can be held up for seconds when the link stalls, so the waits are long. A
+# command is sent up to ATTEMPTS times; that is harmless, as each one sets
+# something absolutely, except udp_sess_new, which opens a session each time
+# and so is sent again only after a long wait.
+REPLY_TIMEOUT = 1.0
+HANDSHAKE_TIMEOUT = 3.0
 ATTEMPTS = 3
-# Frames are never answered, so a session that has quietly died looks the same
-# as one that works. After this long with no answer from the lamp, the session
-# is checked with a keep-alive before the next frame.
-CONFIRM_AFTER = 20.0
+HANDSHAKE_ATTEMPTS = 2
+# While frames flow, a keep-alive goes into the session this often, without
+# waiting for its answer: it is what keeps the session alive, as frames do
+# not. Its answer, read whenever it comes, also shows the lamp is there.
+KEEP_ALIVE_EVERY = 30.0
 # The keep-alive's own setting, misspelt as the lamp spells it.
 KEEP_ALIVE = ["keeplive_interval", 10]
-# After this long without a frame, the next one opens a new session. Direct
-# mode lasts only until the lamp is told to do something else, by its app or
-# by Home Assistant, so a stream starting again after a pause turns it on
-# afresh rather than trusting it is still on.
-RESTART_AFTER = 10.0
-# After the lamp fails to answer, frames are dropped for this long before it
-# is tried again.
+# After this long with frames going out and nothing at all coming back, say
+# so. The session is kept all the same: see the module docstring.
+SILENT_WARN_AFTER = 90.0
+# After this long without a frame, the session has certainly expired, and the
+# next frame opens a new one, which also turns direct mode on afresh in case
+# the lamp's app or Home Assistant gave it something else to show meanwhile.
+RESTART_AFTER = 150.0
+# After the lamp fails to open a session, frames are dropped for this long
+# before it is tried again.
 RETRY_AFTER = 5.0
 # What the lamp answers a token it does not know with.
 TOKEN_REFUSED = -1
@@ -155,8 +166,13 @@ class Lamp:
 
     def __init__(self, ip: str, port: int | None = None) -> None:
         self.ip = ip
-        self._address = (ip, LAMP_PORT if port is None else port)
-        self.sock = self._connect()
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            self.sock.connect((ip, LAMP_PORT if port is None else port))
+        except OSError:
+            self.sock.close()
+            raise
+        self.sock.setblocking(False)
         self.token: str | None = None
         self.sessions = 0
         self._ids = itertools.count(1)
@@ -166,29 +182,9 @@ class Lamp:
         self._last_send = float("-inf")
         self._last_answer = float("-inf")
         self._last_frame = float("-inf")
-
-    def _connect(self) -> socket.socket:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            sock.connect(self._address)
-        except OSError:
-            sock.close()
-            raise
-        sock.setblocking(False)
-        return sock
-
-    def reconnect(self) -> None:
-        """Move to a new socket, and so a new source port, and forget the
-        session. The lamp can stop answering one client socket for good while
-        it answers a new one at once (seen within two minutes of a stream), so
-        a lamp that has gone quiet is tried again from a fresh one."""
-        try:
-            sock = self._connect()
-        except OSError as err:
-            raise LampError(f"cannot reach the lamp at {self.ip}: {err}") from err
-        self.sock.close()
-        self.sock = sock
-        self.token = None
+        self._last_keep_alive = float("-inf")
+        self._opened_at = float("-inf")
+        self._silent = False
 
     def close(self) -> None:
         self.sock.close()
@@ -228,12 +224,18 @@ class Lamp:
                 except ValueError:
                     continue
                 if isinstance(message, dict):
-                    self._last_answer = time.monotonic()
+                    self._heard()
                     found.append(message)
+
+    def _heard(self) -> None:
+        self._last_answer = time.monotonic()
+        if self._silent:
+            LOG.info("The lamp at %s is answering again", self.ip)
+            self._silent = False
 
     def _note(self, message: dict) -> None:
         """Act on a message nobody was waiting for. A refused token in the
-        current session means the lamp has dropped it."""
+        current session means the lamp has ended it."""
         error = message.get("error")
         message_id = message.get("id")
         if (
@@ -243,11 +245,11 @@ class Lamp:
             and isinstance(message_id, int)
             and message_id >= self._session_from
         ):
-            LOG.info("The lamp dropped the session. The next frame opens a new one.")
+            LOG.info("The lamp ended the session. The next frame opens a new one.")
             self.token = None
 
     def drain(self) -> None:
-        """Read whatever the lamp sent unasked."""
+        """Read whatever the lamp sent unasked, keep-alive answers among it."""
         for message in self._messages():
             self._note(message)
 
@@ -263,24 +265,25 @@ class Lamp:
                 return None
             select.select([self.sock], [], [], left)
 
-    def request(self, method: str, params: list) -> dict:
+    def request(self, method: str, params: list) -> dict | None:
         """Send a command in the session and return the lamp's answer, a dict
-        holding ``result`` or ``error``."""
+        holding ``result`` or ``error``, or None when none came."""
         message = {"id": next(self._ids), "method": method, "params": params, "token": self.token}
         for _ in range(ATTEMPTS):
             self._send(message)
             answer = self._wait(lambda m: m.get("id") == message["id"], REPLY_TIMEOUT)
             if answer is not None:
                 return answer
-        raise LampError(f"the lamp at {self.ip} did not answer {method}")
+        return None
 
     def open(self) -> None:
-        """Open a new session and turn direct mode on in it."""
+        """Open a new session and turn direct mode on in it. Only for when no
+        session is alive: the lamp has refused the last, or it has expired."""
         self.token = None
         first = next(self._ids)
         message = {"id": first, "method": "udp_sess_new", "params": []}
         token = None
-        for _ in range(ATTEMPTS):
+        for _ in range(HANDSHAKE_ATTEMPTS):
             self._send(message)
             answer = self._wait(lambda m: m.get("method") == "udp_sess_token", HANDSHAKE_TIMEOUT)
             params = (answer or {}).get("params")
@@ -291,24 +294,46 @@ class Lamp:
             raise LampError(f"the lamp at {self.ip} did not open a session")
         self.token = token
         self._session_from = first
+        self._opened_at = time.monotonic()
+        self._last_keep_alive = self._opened_at
+        self.sessions += 1
         answer = self.request("activate_fx_mode", [{"mode": "direct"}])
+        if answer is None:
+            # Most likely the answer was lost. Opening another session to ask
+            # again is what can freeze the lamp, so this one is kept: its
+            # frames either show, or are refused, which ends it cleanly.
+            LOG.warning(
+                "Opened a session with the lamp at %s, but it did not confirm direct "
+                "mode. Sending frames to it anyway. If the panel stays frozen, "
+                "power-cycle the lamp.", self.ip,
+            )
+            return
         if "error" in answer:
             self.token = None
             raise LampError(f"the lamp at {self.ip} refused direct mode: {answer['error']}")
-        self.sessions += 1
         LOG.info("Opened a session with the lamp at %s, in direct mode", self.ip)
 
     def _prepare(self) -> None:
-        """Make sure the next frame lands in a live session in direct mode."""
+        """Make sure the next frame goes to a session that is alive, and keep
+        it alive."""
         now = time.monotonic()
         if self.token is None or now - self._last_frame > RESTART_AFTER:
             self.open()
             return
-        if now - self._last_answer <= CONFIRM_AFTER:
-            return
-        if "error" in self.request("udp_sess_keep_alive", KEEP_ALIVE):
-            LOG.info("The lamp dropped the session. Opening a new one.")
-            self.open()
+        if now - self._last_keep_alive >= KEEP_ALIVE_EVERY:
+            self._send({
+                "id": next(self._ids), "method": "udp_sess_keep_alive",
+                "params": KEEP_ALIVE, "token": self.token,
+            })
+            self._last_keep_alive = time.monotonic()
+        quiet = now - max(self._last_answer, self._opened_at)
+        if quiet > SILENT_WARN_AFTER and not self._silent:
+            LOG.warning(
+                "The lamp at %s has not answered for %d seconds. Frames still go to "
+                "its session. If the panel is frozen, power-cycle the lamp.",
+                self.ip, quiet,
+            )
+            self._silent = True
 
     def send_frame(self, frame: bytes) -> None:
         """Show a frame of FRAME_BYTES bytes, in the lamp's own pixel order."""
@@ -369,9 +394,9 @@ class Bridge:
             return
         frame, self._pending = self._pending, None
         try:
-            self._show(lamp_order(frame, self.origin))
+            self.lamp.send_frame(lamp_order(frame, self.origin))
         except LampError as err:
-            self.lamp.token = None
+            # The session, if there is one, is kept: see the module docstring.
             self._retry_at = time.monotonic() + RETRY_AFTER
             if not self._failing:
                 LOG.warning(
@@ -384,15 +409,6 @@ class Bridge:
             LOG.info("The lamp at %s is answering again", self.lamp.ip)
             self._failing = False
         self.frames_shown += 1
-
-    def _show(self, frame: bytes) -> None:
-        """Send a frame to the lamp. When the lamp does not answer, send it
-        once more at once from a new socket, which is usually all it takes."""
-        try:
-            self.lamp.send_frame(frame)
-        except LampError:
-            self.lamp.reconnect()
-            self.lamp.send_frame(frame)
 
     def step(self, wait: float = 0.25) -> None:
         """Wait up to ``wait`` seconds for something to do, then do it."""
