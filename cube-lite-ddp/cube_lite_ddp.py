@@ -24,12 +24,17 @@ Assistant integration, which takes a whole frame of pixels at a time and up to
   interval of 10 that this sets, about two minutes with none set. After that
   every datagram in it, frames included, is refused with error code -1, so a
   new session has to be opened, and direct mode turned on again in it;
-- opening a second session and turning direct mode on in it while another is
-  still alive froze the lamp's display in testing: it went on answering
-  handshakes and keep-alives but no command, and showed no frame, until it was
-  power-cycled. So a session is never given up because the lamp is quiet,
-  which over Wi-Fi it can be for seconds at a time, only when the lamp refuses
-  it, or when it has certainly expired.
+- the lamp can hang: its display stops, it answers handshakes and keep-alives
+  but no other command, its sessions end after about a minute however they
+  are kept alive, and nothing but a power cycle brings it back. In testing it
+  hung on a weak power supply, under heavy 2.4 GHz interference while taking
+  30 frames a second, which 15 a second rode out, and once when a second
+  session was opened and direct mode turned on in it while the first was
+  streaming. A second session beside an idle one did not hang it, but that
+  one hang may have come from the interference rather than the second
+  session, so a session is never given up because the lamp is quiet, which
+  over Wi-Fi it can be for seconds at a time, only when the lamp refuses it,
+  or when it has certainly expired.
 """
 
 from __future__ import annotations

@@ -37,13 +37,18 @@ address, so this sits in between.
   `--discover` has it on.
 - One controller on the lamp's UDP session at a time. Opening a second
   session while one is streaming froze the lamp's display in testing, until it
-  was power-cycled. That rules out running the yeelight-cube-lite integration
-  alongside this, and `--test` while the bridge is streaming. Home Assistant's
-  Matter integration is a different path, and can stay.
+  was power-cycled; that was on a day of heavy interference, which may have
+  done it instead, but it is not worth the risk. That rules out running the
+  yeelight-cube-lite integration alongside this, and `--test` while the bridge
+  is streaming. Home Assistant's Matter integration is a different path, and
+  can stay.
 - A power supply that keeps up. The lamp draws up to about 6 W on a bright
   picture, and the yeelight-cube-lite integration recommends a 12 W port. On a
   laptop's USB port it ran dim and dropped off the network, and a long, thin
   cable from a good adapter was not much better; a short, sturdy one is.
+- A steady Wi-Fi link. The lamp is on 2.4 GHz, and under heavy interference
+  there it hung while taking 30 frames a second, where 15 held up. Locking it
+  to the nearest access point helped too.
 
 ## Setting it up
 
@@ -67,18 +72,18 @@ python cube_lite_ddp.py 192.168.1.40 --test
 
 Do this before starting the bridge, not while it streams: `--test` opens a
 session of its own. The top row should turn red and the bottom row magenta,
-with a white column at the left edge. If it does, what LedFx draws at its top left appears at the
-lamp's top left. If not, see `--origin` below.
+with a white column at the left edge. If it does, what LedFx draws at its top
+left appears at the lamp's top left. If not, see `--origin` below.
 
 Start the bridge, as at the top, and leave it running. Then in LedFx:
 
 1. Add a device of type **DDP**.
 2. Give it the address of the machine running the bridge, `127.0.0.1` when it
    is the same machine as LedFx, port `4048`, and `100` pixels.
-3. Optionally set the device's refresh rate to 30. LedFx sends 60 frames a
-   second by default and the bridge drops every frame it cannot send on time,
-   always keeping the newest, so 60 works; 30 just saves sending what is
-   dropped.
+3. Set the device's refresh rate to 30, or to 15 when the lamp's Wi-Fi is
+   noisy. LedFx sends 60 frames a second by default and the bridge drops every
+   frame it cannot send on time, always keeping the newest, so 60 works; 30
+   saves sending what is dropped, and 15 halves the load on the lamp's link.
 4. In the settings of the device's virtual, set **rows** to `5`. That makes
    the 100 pixels a matrix of 20 columns by 5 rows, which the 2D effects draw
    on. Without it LedFx treats them as one long strip.
@@ -118,8 +123,12 @@ rather than anything here.
   lamp's app or Home Assistant gave the lamp something else to show meanwhile.
 - When the lamp does not open a session at all, says so once, drops frames,
   tries again every 5 seconds, and says when the lamp is back.
-- When the lamp's display freezes anyway, which is what a weak power supply
-  does, nothing sent over the network brings it back: power-cycle the lamp.
+- When the lamp hangs anyway, nothing sent over the network brings it back:
+  power-cycle it. A hung lamp's display stops, it answers handshakes and
+  keep-alives but no other command, and its sessions end after about a
+  minute, so the bridge logs one session after another that did not confirm
+  direct mode. In testing it hung on a weak power supply, and under heavy
+  2.4 GHz interference at 30 frames a second, which 15 rode out.
 
 The lamp keeps showing the last frame after the bridge stops, until it is
 given something else to show from its app or Home Assistant.
