@@ -19,10 +19,11 @@ Assistant integration, which takes a whole frame of pixels at a time and up to
   for that session only;
 - ``update_leds`` carries a frame as base64 of the R, G, B bytes of its 100
   pixels, row by row from the bottom left, and is never answered;
-- a session lasts about two minutes after its last ``udp_sess_keep_alive``,
-  frames not counting, and after that every datagram in it, frames included, is
-  refused with error code -1, so a new session has to be opened, and direct
-  mode turned on again in it;
+- a session ends about four keep-alive intervals after its last
+  ``udp_sess_keep_alive``, frames not counting: about 40 seconds with the
+  interval of 10 that this sets, about two minutes with none set. After that
+  every datagram in it, frames included, is refused with error code -1, so a
+  new session has to be opened, and direct mode turned on again in it;
 - opening a second session and turning direct mode on in it while another is
   still alive froze the lamp's display in testing: it went on answering
   handshakes and keep-alives but no command, and showed no frame, until it was
@@ -75,9 +76,12 @@ ATTEMPTS = 3
 HANDSHAKE_ATTEMPTS = 2
 # While frames flow, a keep-alive goes into the session this often, without
 # waiting for its answer: it is what keeps the session alive, as frames do
-# not. Its answer, read whenever it comes, also shows the lamp is there.
-KEEP_ALIVE_EVERY = 30.0
-# The keep-alive's own setting, misspelt as the lamp spells it.
+# not. Its answer, read whenever it comes, also shows the lamp is there. Once
+# every interval it announces, so three in a row can be lost to a Wi-Fi stall
+# before the session ends; at once every 30 seconds, losing one ended it.
+KEEP_ALIVE_EVERY = 10.0
+# The keep-alive's own setting, the interval in seconds, misspelt as the lamp
+# spells it.
 KEEP_ALIVE = ["keeplive_interval", 10]
 # After this long with frames going out and nothing at all coming back, say
 # so. The session is kept all the same: see the module docstring.

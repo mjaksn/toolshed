@@ -103,9 +103,10 @@ rather than anything here.
 - Sends the lamp nothing faster than 30 datagrams a second, which is as fast
   as the lamp answers reliably. A frame that arrives before the last one has
   gone replaces it, so the lamp is never behind.
-- Sends a keep-alive into the session every 30 seconds while frames flow,
-  without waiting for its answer. The lamp ends a session about two minutes
-  after its last keep-alive, and frames do not count.
+- Sends a keep-alive into the session every 10 seconds while frames flow,
+  without waiting for its answer. The lamp ends a session about 40 seconds
+  after its last keep-alive, and frames do not count, so three can be lost to
+  a Wi-Fi stall before it does.
 - Keeps the session however quiet the lamp goes. Over Wi-Fi its answers can be
   held up for seconds, and opening a second session to replace one that is
   only slow is what froze the lamp in testing. After 90 seconds without a word
