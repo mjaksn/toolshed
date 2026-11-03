@@ -22,6 +22,10 @@ a repository of its own goes in here.
   server, the one place deletion is possible.
 - [claude-sessions](claude-sessions/), PowerShell scripts that record which Claude
   Code sessions are open in a console window and reopen them after a reboot.
+- [cube-lite-ddp](cube-lite-ddp/), a Python script that shows LedFx on a
+  Yeelight Cube Lite: it takes DDP frames and passes them to the lamp's 20 by 5
+  pixel matrix over the lamp's undocumented UDP session, up to 30 a second.
+  Standard library only.
 - [dispatch-desk](dispatch-desk/), a PowerShell module that creates Windows
   desktop shortcuts, each one dispatching a GitHub Actions workflow and then
   watching the run through to its conclusion.
@@ -126,7 +130,7 @@ A tool with no `ci.json` is not checked, and most will not have one. There is
 no penalty for that, and nothing at the root has to be edited either way: the
 workflow finds the tools by looking, never from a list.
 
-Thirteen tools have a check now. `dispatch-desk` runs PSScriptAnalyzer, fetched
+Fourteen tools have a check now. `dispatch-desk` runs PSScriptAnalyzer, fetched
 from the gallery and verified against a recorded hash rather than installed, so
 what the check ran against is the same module every time. That is the same
 arrangement the tool already uses for powershell-yaml at run time, and for the
@@ -136,15 +140,17 @@ that analyzer script pointed at its own directory, with its own settings file.
 same way and then run their own tests, written in plain PowerShell.
 `BasicUpsAdapter` runs its own test suite under `node --test`, with nothing to
 install first. `WinEvents` installs its test dependencies, pinned by version and
-hash, and runs `pytest`. `lock-hashes`, `ha-rest-yaml`, `smtp-sink` and
-`ReceiveFile` run their own tests under `unittest`, with nothing to install;
-the last two start their real servers on the loopback address and talk to them
-in SMTP and HTTP, so they need no network and no privileges. `easy-systemd`
+hash, and runs `pytest`. `lock-hashes`, `ha-rest-yaml`, `smtp-sink`,
+`ReceiveFile` and `cube-lite-ddp` run their own tests under `unittest`, with
+nothing to install; `smtp-sink` and `ReceiveFile` start their real servers on
+the loopback address and talk to them in SMTP and HTTP, and `cube-lite-ddp`
+runs its bridge there against a stand-in lamp, so none of the three needs a
+network or privileges. `easy-systemd`
 and `lid-ignore` are the exceptions to that: the first installs, restarts and
 removes real services on the runner's own systemd and checks what each one
 ends up running, and the second writes the logind drop-in, restarts logind and
 configures a throwaway user, then puts everything back as it was; both need
-root, which they take with `sudo`. Those last eight each keep the command in a
+root, which they take with `sudo`. Those last nine each keep the command in a
 `check.sh` beside its `ci.json`, so the check CI runs is one a person can run
 too.
 
