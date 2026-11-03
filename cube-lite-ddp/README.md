@@ -104,8 +104,12 @@ rather than anything here.
 - Opens a fresh session when frames start again after a pause of more than
   10 seconds, because the lamp leaves direct mode the moment its app or Home
   Assistant tells it to do something else.
-- When the lamp stops answering, says so once, drops frames, and tries again
-  every 5 seconds, and says when it is back.
+- When the lamp stops answering, sends the frame again at once from a new
+  socket. The lamp can stop answering one client socket altogether while it
+  answers a new one straight away, and in a stream it has done so within two
+  minutes. If the new socket gets no answer either, says so once, drops frames,
+  tries again every 5 seconds, each time from a new socket, and says when the
+  lamp is back.
 
 The lamp keeps showing the last frame after the bridge stops, until it is
 given something else to show from its app or Home Assistant.
@@ -152,9 +156,11 @@ They cover:
 - a session the lamp has dropped, found by the keep-alive or by a refused
   frame, and a new one opened with direct mode on again;
 - a fresh session after a pause;
+- a lamp that stops answering the bridge's socket, and is answered from a
+  new one without a pause;
 - a lamp that stops answering and comes back;
 - the frame fitting in one of the lamp's datagrams, and the test pattern;
 - `--test` against a lamp and against no lamp, a port in use, and no lamp
   address given.
 
-They take about seven seconds.
+They take about eight seconds.

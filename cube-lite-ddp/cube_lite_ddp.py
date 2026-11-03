@@ -20,7 +20,10 @@ Assistant integration, which takes a whole frame of pixels at a time and up to
 - ``update_leds`` carries a frame as base64 of the R, G, B bytes of its 100
   pixels, row by row from the bottom left, and is never answered;
 - a token the lamp no longer knows is refused with error code -1, and a new
-  session has to be opened, and direct mode turned on again in it.
+  session has to be opened, and direct mode turned on again in it;
+- the lamp can stop answering one client socket altogether, while it answers
+  a new one at once, so a session is opened again from a fresh socket when the
+  lamp goes quiet.
 """
 
 from __future__ import annotations
@@ -152,13 +155,8 @@ class Lamp:
 
     def __init__(self, ip: str, port: int | None = None) -> None:
         self.ip = ip
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            self.sock.connect((ip, LAMP_PORT if port is None else port))
-        except OSError:
-            self.sock.close()
-            raise
-        self.sock.setblocking(False)
+        self._address = (ip, LAMP_PORT if port is None else port)
+        self.sock = self._connect()
         self.token: str | None = None
         self.sessions = 0
         self._ids = itertools.count(1)
@@ -168,6 +166,29 @@ class Lamp:
         self._last_send = float("-inf")
         self._last_answer = float("-inf")
         self._last_frame = float("-inf")
+
+    def _connect(self) -> socket.socket:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(self._address)
+        except OSError:
+            sock.close()
+            raise
+        sock.setblocking(False)
+        return sock
+
+    def reconnect(self) -> None:
+        """Move to a new socket, and so a new source port, and forget the
+        session. The lamp can stop answering one client socket for good while
+        it answers a new one at once (seen within two minutes of a stream), so
+        a lamp that has gone quiet is tried again from a fresh one."""
+        try:
+            sock = self._connect()
+        except OSError as err:
+            raise LampError(f"cannot reach the lamp at {self.ip}: {err}") from err
+        self.sock.close()
+        self.sock = sock
+        self.token = None
 
     def close(self) -> None:
         self.sock.close()
@@ -348,7 +369,7 @@ class Bridge:
             return
         frame, self._pending = self._pending, None
         try:
-            self.lamp.send_frame(lamp_order(frame, self.origin))
+            self._show(lamp_order(frame, self.origin))
         except LampError as err:
             self.lamp.token = None
             self._retry_at = time.monotonic() + RETRY_AFTER
@@ -363,6 +384,15 @@ class Bridge:
             LOG.info("The lamp at %s is answering again", self.lamp.ip)
             self._failing = False
         self.frames_shown += 1
+
+    def _show(self, frame: bytes) -> None:
+        """Send a frame to the lamp. When the lamp does not answer, send it
+        once more at once from a new socket, which is usually all it takes."""
+        try:
+            self.lamp.send_frame(frame)
+        except LampError:
+            self.lamp.reconnect()
+            self.lamp.send_frame(frame)
 
     def step(self, wait: float = 0.25) -> None:
         """Wait up to ``wait`` seconds for something to do, then do it."""

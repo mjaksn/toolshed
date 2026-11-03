@@ -40,6 +40,9 @@ class FakeLamp(threading.Thread):
         # on in its session, the decoded pixel bytes).
         self.frames: list[tuple[float, str, bool, bytes]] = []
         self.silent = False
+        # Client ports the lamp has stopped answering, and ignores entirely,
+        # while it still answers every other.
+        self.ignored_ports: set[int] = set()
         self._halt = threading.Event()
 
     def stop(self) -> None:
@@ -62,7 +65,7 @@ class FakeLamp(threading.Thread):
             for line in data.splitlines():
                 message = json.loads(line)
                 with self.lock:
-                    if self.silent:
+                    if self.silent or peer[1] in self.ignored_ports:
                         continue
                     reply = self._handle(message)
                 if reply is not None:
@@ -258,6 +261,25 @@ class SessionTest(BridgeTest):
         _, _, direct, _ = self.shown(2)[1]
         self.assertTrue(direct)
         self.assertEqual(self.fake.methods.count("udp_sess_new"), 2)
+
+    def test_lamp_ignoring_the_socket_is_left_for_a_new_one(self):
+        with mock.patch.object(cube, "CONFIRM_AFTER", 0.2), mock.patch.object(cube, "REPLY_TIMEOUT", 0.05):
+            self.send(ddp(rows_frame(ROW_COLOURS)))
+            first = self.shown(1)[0][1]
+            old_port = self.lamp.sock.getsockname()[1]
+            with self.fake.lock:
+                self.fake.ignored_ports.add(old_port)
+            time.sleep(0.3)
+            # The keep-alive goes unanswered; the same frame is sent again at
+            # once from a new socket, without waiting for the retry.
+            latest = rows_frame([(3, 3, 3)] * cube.ROWS)
+            self.send(ddp(latest))
+            _, token, direct, pixels = self.shown(2)[1]
+        self.assertNotEqual(self.lamp.sock.getsockname()[1], old_port)
+        self.assertNotEqual(token, first)
+        self.assertTrue(direct)
+        self.assertEqual(pixels, latest)
+        self.assertFalse(self.bridge._failing)
 
     def test_stream_after_a_pause_opens_a_fresh_session(self):
         with mock.patch.object(cube, "RESTART_AFTER", 0.2):
