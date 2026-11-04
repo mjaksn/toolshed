@@ -167,8 +167,8 @@ They cover:
 - a frame split over packets, shown only once the last arrives;
 - the DDP timecode header;
 - a frame short of 100 pixels, the rest left black, and one longer, cut;
-- packets that are not pixels: queries, another DDP version, a destination
-  other than the display, and packets cut short;
+- packets that are not pixels: queries and replies, another DDP version, a
+  destination other than the display, and packets cut short;
 - frames sent faster than the lamp takes them, held to its rate with the
   newest shown;
 - a stream carried in one session;

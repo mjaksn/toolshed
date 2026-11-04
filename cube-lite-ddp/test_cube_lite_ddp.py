@@ -338,6 +338,11 @@ class PieceTest(unittest.TestCase):
         self.assertEqual(cube.parse_ddp(ddp(b"abc", offset=6)), (6, b"abc", True))
         self.assertEqual(cube.parse_ddp(ddp(b"abc", push=False)), (0, b"abc", False))
         self.assertIsNone(cube.parse_ddp(ddp(b"abc", flags=0x40 | cube.DDP_REPLY)))
+        # The flag bytes as they are on the wire, not as the constants say:
+        # query and reply, each with PUSH, are not pixels.
+        self.assertIsNone(cube.parse_ddp(b"\x43" + ddp(b"abc")[1:]))
+        self.assertIsNone(cube.parse_ddp(b"\x45" + ddp(b"abc")[1:]))
+        self.assertEqual(cube.parse_ddp(b"\x41" + ddp(b"abc")[1:]), (0, b"abc", True))
         self.assertIsNone(cube.parse_ddp(ddp(b"abc", dest=0)))
         self.assertEqual(cube.parse_ddp(ddp(b"abc", dest=255)), (0, b"abc", True))
 

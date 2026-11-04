@@ -115,8 +115,8 @@ SEARCH = (
 DDP_VERSION_MASK = 0xC0
 DDP_VERSION_1 = 0x40
 DDP_TIMECODE = 0x10
-DDP_QUERY = 0x08
-DDP_REPLY = 0x02
+DDP_QUERY = 0x02
+DDP_REPLY = 0x04
 DDP_PUSH = 0x01
 # Destination IDs that name something other than the pixels: 0 is reserved,
 # 246 is control, 250 config, 251 status and 254 DMX. LedFx sends to 1.
