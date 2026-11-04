@@ -166,7 +166,8 @@ They cover:
   passed through unchanged with `--origin bottom-left`;
 - a frame split over packets, shown only once the last arrives;
 - the DDP timecode header;
-- a frame short of 100 pixels, the rest left black, and one longer, cut;
+- a frame short of 100 pixels, the pixels it never fills left black, and one
+  longer, cut;
 - packets that are not pixels: queries and replies, another DDP version, a
   destination other than the display, and packets cut short;
 - frames sent faster than the lamp takes them, held to its rate with the
