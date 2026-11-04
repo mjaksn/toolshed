@@ -50,23 +50,23 @@ tool is set up by following its own README.
 | Format | none configured |
 | Run | per tool, see its README |
 
-`ruff check .` was run in this checkout and passes. It covers seven places
+`ruff check .` was run in this checkout and passes. It covers eight places
 now: `apitrace/apitrace.py`, which carries its own `apitrace/ruff.toml`
 switching off three stylistic rules for that one file with a reason beside
 each; the two files in `WinEvents`, which carry a `WinEvents/ruff.toml` of the
 same kind; the two files in `smtp-sink`, which carry a `smtp-sink/ruff.toml`
 turning off `BLE001` and `S110` for the handlers that keep one bad client or
 one failed forward from taking the server down, again with a reason beside
-each; the two files in `lock-hashes`, the six in `ha-rest-yaml` and the two
-in `ReceiveFile`, which pass on the defaults and carry no `ruff.toml`; and
-`.github/changed_tools.py`, the CI plumbing. It runs repository-wide and
-unconditionally, so any Python that lands is linted on arrival whatever else a
-change touched. CI installs ruff from
+each; the two files in `lock-hashes`, the six in `ha-rest-yaml`, the two
+in `ReceiveFile` and the two in `cube-lite-ddp`, which pass on the defaults
+and carry no `ruff.toml`; and `.github/changed_tools.py`, the CI plumbing. It
+runs repository-wide and unconditionally, so any Python that lands is linted
+on arrival whatever else a change touched. CI installs ruff from
 `.github/requirements-lint.txt`, pinned by version and hash, so the same
 version can be had locally with
 `pip install --require-hashes --requirement .github/requirements-lint.txt`.
 
-Thirteen tools have a check. `cd dispatch-desk && ./check.ps1` runs
+Fourteen tools have a check. `cd dispatch-desk && ./check.ps1` runs
 PSScriptAnalyzer over that directory and then `test.ps1`, and takes about a
 minute the first time, because it fetches the analyzer and the YAML parser,
 and seconds afterwards from the cache. It passes with nothing reported and 88
@@ -108,7 +108,10 @@ takes about three seconds, and was also run under WSL. `cd ReceiveFile &&
 bash ./check.sh` runs that tool's 25 unittest tests with nothing to install;
 they start the real server on the loopback address, on a port the operating
 system picks, saving into a temporary directory, and take about two seconds.
-Every one of these was run in this checkout and passes.
+`cd cube-lite-ddp && bash ./check.sh` runs that tool's 23 unittest tests with
+nothing to install; they run the bridge against a stand-in lamp on the
+loopback address, on ports the operating system picks, and take about nine
+seconds. Every one of these was run in this checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.
 If one is added without running it, mark it `UNVERIFIED` rather than implying

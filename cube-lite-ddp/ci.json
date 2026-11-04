@@ -1,0 +1,4 @@
+{
+  "runner": "ubuntu-latest",
+  "check": "bash ./check.sh"
+}
