@@ -178,6 +178,7 @@ They cover:
 - a lamp that stops answering keep-alives, or never confirms direct mode,
   keeping its one session, with a warning;
 - a fresh session after a pause;
+- a first frame that fails to send, retried in the session just opened;
 - a lamp that opens no session, tried again until it does;
 - the frame fitting in one of the lamp's datagrams, and the test pattern;
 - `--test` against a lamp and against no lamp, a port in use, and no lamp

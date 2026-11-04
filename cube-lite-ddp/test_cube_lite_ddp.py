@@ -317,6 +317,27 @@ class SessionTest(BridgeTest):
             second = self.shown(2)[1][1]
         self.assertNotEqual(first, second)
 
+    def test_first_frame_that_fails_to_send_is_retried_in_the_new_session(self):
+        # The session opens, then the first frame cannot be sent. The retry
+        # must use that session, not open another beside it.
+        send = self.lamp._send
+        failed = []
+
+        def flaky(message):
+            if message["method"] == "update_leds" and not failed:
+                failed.append(message)
+                raise cube.LampError("cannot send to the lamp: a test")
+            send(message)
+
+        self.lamp._send = flaky
+        with mock.patch.object(cube, "RETRY_AFTER", 0.05):
+            self.send(ddp(rows_frame(ROW_COLOURS)))
+            self.assertTrue(wait_for(lambda: failed))
+            time.sleep(0.1)
+            self.send(ddp(rows_frame(ROW_COLOURS)))
+            self.shown(1)
+        self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+
     def test_lamp_that_opens_no_session_is_retried_and_frames_resume(self):
         with mock.patch.object(cube, "RETRY_AFTER", 0.3), mock.patch.object(cube, "REPLY_TIMEOUT", 0.05), \
                 mock.patch.object(cube, "HANDSHAKE_TIMEOUT", 0.05):

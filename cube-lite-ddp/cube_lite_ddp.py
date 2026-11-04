@@ -326,7 +326,11 @@ class Lamp:
         """Make sure the next frame goes to a session that is alive, and keep
         it alive."""
         now = time.monotonic()
-        if self.token is None or now - self._last_frame > RESTART_AFTER:
+        # Idle since the last frame, or since the session opened when no frame
+        # has gone into it yet: a first frame that failed to send must not
+        # make the retry open a second session beside this one.
+        idle = now - max(self._last_frame, self._opened_at)
+        if self.token is None or idle > RESTART_AFTER:
             self.open()
             return
         if now - self._last_keep_alive >= KEEP_ALIVE_EVERY:
