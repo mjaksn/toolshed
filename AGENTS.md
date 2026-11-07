@@ -108,10 +108,10 @@ takes about three seconds, and was also run under WSL. `cd ReceiveFile &&
 bash ./check.sh` runs that tool's 25 unittest tests with nothing to install;
 they start the real server on the loopback address, on a port the operating
 system picks, saving into a temporary directory, and take about two seconds.
-`cd cube-lite-ddp && bash ./check.sh` runs that tool's 35 unittest tests with
+`cd cube-lite-ddp && bash ./check.sh` runs that tool's 37 unittest tests with
 nothing to install; they run the bridge against a stand-in lamp on the
-loopback address, on ports the operating system picks, and take about fifteen
-seconds, or about nineteen on Windows. Every one of these was run in this
+loopback address, on ports the operating system picks, and take about sixteen
+seconds, or about twenty on Windows. Every one of these was run in this
 checkout and passes.
 
 Every command in this table has been run in this repo and its output verified.

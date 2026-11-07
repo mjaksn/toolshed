@@ -107,6 +107,8 @@ RESTART_AFTER = 150.0
 RETRY_AFTER = 5.0
 # What the lamp answers a token it does not know with.
 TOKEN_REFUSED = -1
+# --hold takes no longer than this, in seconds.
+MAX_HOLD = 600.0
 # What it answers a frame with when its session is no longer in direct mode,
 # as when something else has given the lamp an effect of its own to show.
 ILLEGAL_REQUEST = 6
@@ -193,8 +195,12 @@ def pattern_frame() -> bytes:
 class Lamp:
     """One UDP command session with a Cube Lite, kept in direct mode."""
 
-    def __init__(self, ip: str, port: int | None = None) -> None:
+    def __init__(self, ip: str, port: int | None = None, hold: float = 0.0) -> None:
         self.ip = ip
+        # After the lamp ends a session, which it does once it has restarted,
+        # it is sent nothing for this many seconds, until hold_until.
+        self.hold = hold
+        self.hold_until = float("-inf")
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             self.sock.connect((ip, LAMP_PORT if port is None else port))
@@ -336,8 +342,15 @@ class Lamp:
         ):
             return
         if error.get("code") == TOKEN_REFUSED:
-            LOG.info("The lamp ended the session. The next frame opens a new one.")
             self.token = None
+            if self.hold:
+                self.hold_until = time.monotonic() + self.hold
+                LOG.info(
+                    "The lamp ended the session, as it does after restarting. Sending it nothing "
+                    "for %g seconds, then opening a new one.", self.hold,
+                )
+            else:
+                LOG.info("The lamp ended the session. The next frame opens a new one.")
         elif (
             error.get("code") == ILLEGAL_REQUEST
             and not self._left_direct
@@ -563,7 +576,9 @@ class Bridge:
 
     def _forward(self) -> None:
         now = time.monotonic()
-        if self._pending is None or now < max(self._retry_at, self._next_frame, self.lamp.next_send()):
+        if self._pending is None or now < max(
+            self._retry_at, self._next_frame, self.lamp.next_send(), self.lamp.hold_until,
+        ):
             return
         frame, self._pending = self._pending, None
         try:
@@ -637,7 +652,9 @@ class Bridge:
     def step(self, wait: float = 0.25) -> None:
         """Wait up to ``wait`` seconds for something to do, then do it."""
         if self._pending is not None:
-            due = max(self.lamp.next_send(), self._retry_at, self._next_frame) - time.monotonic()
+            due = max(
+                self.lamp.next_send(), self._retry_at, self._next_frame, self.lamp.hold_until,
+            ) - time.monotonic()
             wait = max(0.0, min(wait, due))
         readable, _, _ = select.select([self.sock, self.lamp.sock], [], [], wait)
         if self.sock in readable:
@@ -749,9 +766,9 @@ def run_discover() -> int:
     return 0
 
 
-def open_lamp(ip: str) -> Lamp | None:
+def open_lamp(ip: str, hold: float = 0.0) -> Lamp | None:
     try:
-        return Lamp(ip)
+        return Lamp(ip, hold=hold)
     except OSError as err:
         print(f"Cannot use {ip} as the lamp's address: {err}", file=sys.stderr)
         return None
@@ -778,8 +795,9 @@ def run_test(ip: str, origin: str) -> int:
 
 def run_bridge(
     ip: str, host: str, port: int, origin: str, stats_every: float = 0.0, max_fps: int = MAX_FPS,
+    hold: float = 0.0,
 ) -> int:
-    lamp = open_lamp(ip)
+    lamp = open_lamp(ip, hold)
     if lamp is None:
         return 1
     probe = TcpProbe(ip, stats_every) if stats_every else None
@@ -854,11 +872,21 @@ def main(argv: list[str] | None = None) -> int:
             "(default: %(default)s, as many as it takes)"
         ),
     )
+    parser.add_argument(
+        "--hold", type=float, default=0.0, metavar="SECONDS",
+        help=(
+            "after the lamp ends a session, as it does once it has restarted, send it nothing "
+            "for SECONDS before opening a new one, to let it finish starting up "
+            f"(default: 0, open one at once; at most {MAX_HOLD:g})"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.stats and not args.stats >= MIN_STATS_EVERY:
         parser.error(f"--stats takes at least {MIN_STATS_EVERY:g} seconds, or 0 for none")
     if not 1 <= args.max_fps <= MAX_FPS:
         parser.error(f"--max-fps takes from 1 to {MAX_FPS}")
+    if not 0 <= args.hold <= MAX_HOLD:
+        parser.error(f"--hold takes from 0 to {MAX_HOLD:g} seconds")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     if args.discover:
@@ -867,7 +895,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("give the lamp's IP address, or use --discover to find it")
     if args.test:
         return run_test(args.lamp, args.origin)
-    return run_bridge(args.lamp, args.listen, args.port, args.origin, args.stats, args.max_fps)
+    return run_bridge(args.lamp, args.listen, args.port, args.origin, args.stats, args.max_fps, args.hold)
 
 
 if __name__ == "__main__":
