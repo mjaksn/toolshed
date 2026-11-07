@@ -102,6 +102,7 @@ rather than anything here.
 | `--origin top-left` | Where the first pixel of a frame belongs. `top-left`, the default, is the order LedFx lays a matrix out in. `bottom-left` is the lamp's own order, for a sender that already uses it. |
 | `--stats SECONDS` | Logs a status line every `SECONDS` while frames flow, and tries the lamp's TCP port as often; see below. Off by default, and at least 5 when on. |
 | `--max-fps N` | Sends the lamp at most `N` frames a second, from 1 to 30, dropping the rest and keeping the newest as ever. 30 by default, as many as the lamp takes. LedFx sends no fewer than 10 a second, so this is the way to go lower. |
+| `--hold SECONDS` | After the lamp ends a session, as it does once it has restarted, sends it nothing for `SECONDS` before opening a new one, to give it time to finish starting up. 0 by default, opening one at once; at most 600. |
 
 ## Tracking down a hang
 
@@ -151,6 +152,8 @@ container when it is recreated, and the record with it.
   again after a pause of more than 150 seconds, by when the old one has
   certainly expired. The new session turns direct mode on afresh, in case the
   lamp's app or Home Assistant gave the lamp something else to show meanwhile.
+  With `--hold`, a session the lamp refused is followed by that long with
+  nothing sent, frames dropped, before the new one is opened.
 - When the lamp refuses frames as illegal requests, which it does once
   something else, such as its app, Home Assistant or a Matter controller, has
   given it an effect of its own, says so and turns direct mode on again in
@@ -225,6 +228,8 @@ They cover:
 - errors the protocol does not explain, logged once a session each, naming
   what they answered;
 - a fresh session after a pause;
+- a lamp that ends a session sent nothing for the `--hold` time, then given a
+  new one;
 - a first frame that fails to send, retried in the session just opened;
 - a lamp that opens no session, tried again until it does;
 - the status line while frames flow, its counts of frames, keep-alives,
@@ -233,7 +238,7 @@ They cover:
   it and a lamp that is gone, sending nothing, and logging only a change;
 - the frame fitting in one of the lamp's datagrams, and the test pattern;
 - `--test` against a lamp and against no lamp, a port in use, no lamp
-  address given, a `--stats` interval that is too short, and a `--max-fps`
-  out of range.
+  address given, a `--stats` interval that is too short, and a `--max-fps` or
+  `--hold` out of range.
 
-They take about fifteen seconds, or about nineteen on Windows.
+They take about sixteen seconds, or about twenty on Windows.

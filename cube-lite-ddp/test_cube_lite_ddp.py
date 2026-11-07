@@ -144,12 +144,13 @@ class BridgeTest(unittest.TestCase):
     stats_every = 0.0
     probe = None
     max_fps = cube.MAX_FPS
+    hold = 0.0
 
     def setUp(self) -> None:
         logging.getLogger("cube_lite_ddp").setLevel(logging.CRITICAL)
         self.fake = FakeLamp()
         self.fake.start()
-        self.lamp = cube.Lamp(LOOPBACK, self.fake.port)
+        self.lamp = cube.Lamp(LOOPBACK, self.fake.port, self.hold)
         self.bridge = cube.Bridge(
             self.lamp, LOOPBACK, 0, self.origin, self.stats_every, self.probe, self.max_fps,
         )
@@ -244,6 +245,33 @@ class ForwardingTest(BridgeTest):
         self.assertGreaterEqual(len(shown), 3)
         self.assertEqual(len({token for _, token, _, _ in shown}), 1)
         self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+
+
+class HoldTest(BridgeTest):
+    hold = 0.8
+
+    def test_lamp_that_ends_a_session_is_sent_nothing_for_a_while(self):
+        self.send(ddp(rows_frame(ROW_COLOURS)))
+        first = self.shown(1)[0][1]
+        self.fake.forget_tokens()
+        later = rows_frame([(5, 5, 5)] * cube.ROWS)
+        # A frame refused, then frames every 50 ms through the hold and past it.
+        self.send(ddp(rows_frame(ROW_COLOURS)))
+        self.assertTrue(wait_for(lambda: self.lamp.token is None))
+        ended = time.monotonic()
+        with self.fake.lock:
+            sent_by_then = len(self.fake.methods)
+        end = ended + 3
+        while time.monotonic() < end and not any(f[1] != first for f in self.fake.frames):
+            self.send(ddp(later))
+            time.sleep(0.05)
+        with self.fake.lock:
+            during = self.fake.methods[sent_by_then:]
+            new = next(f for f in self.fake.frames if f[1] != first)
+        self.assertEqual(during[0], "udp_sess_new", during)
+        self.assertGreater(new[0] - ended, self.hold * 0.9)
+        self.assertEqual(new[3], later)
+        self.assertEqual(self.fake.methods.count("udp_sess_new"), 2)
 
 
 class MaxFpsTest(BridgeTest):
@@ -617,6 +645,12 @@ class CommandLineTest(unittest.TestCase):
         for value in ("0", "-5", "31", "fast"):
             with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
                 cube.main([LOOPBACK, "--max-fps", value])
+            self.assertEqual(raised.exception.code, 2, value)
+
+    def test_hold_out_of_range_is_refused(self):
+        for value in ("-1", "601", "nan", "long"):
+            with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
+                cube.main([LOOPBACK, "--hold", value])
             self.assertEqual(raised.exception.code, 2, value)
 
     def test_lamp_is_required(self):
