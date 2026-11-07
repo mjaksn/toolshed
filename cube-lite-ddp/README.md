@@ -100,6 +100,35 @@ rather than anything here.
 | `--listen ADDRESS` | The address to listen for DDP on. Every interface by default. |
 | `--port PORT` | The UDP port to listen for DDP on. 4048 by default, DDP's own. |
 | `--origin top-left` | Where the first pixel of a frame belongs. `top-left`, the default, is the order LedFx lays a matrix out in. `bottom-left` is the lamp's own order, for a sender that already uses it. |
+| `--stats SECONDS` | Logs a status line every `SECONDS` while frames flow, and tries the lamp's TCP port as often; see below. Off by default, and at least 5 when on. |
+
+## Tracking down a hang
+
+`--stats 60` leaves a record to read after the lamp hangs. Once a minute,
+while anything flows, it logs a line like this:
+
+```
+Status: from LedFx 900 frames, longest gap 0.081 s, 0 dropped; to the lamp 900 frames at 31% level; session 1, 3605 s old; message ID 57712; keep-alives 6 sent, 6 answered, slowest 0.012 s; last heard 4.2 s ago; 0 errors; TCP 55443 open (5 ms)
+```
+
+That is, for the minute since the last line: the frames LedFx sent, the
+longest it went quiet, and the frames that arrived faster than the lamp takes
+them and were replaced; the frames sent to the lamp and how bright they were on
+average; the session's number and age, and the ID of the last message sent;
+the keep-alives sent and answered, with the slowest answer; when the lamp was
+last heard from; the errors it answered with; and the last try of its TCP port.
+
+It also tries the lamp's documented TCP port, 55443, as often, from its own
+thread: it opens a connection and closes it, sending nothing, and logs the
+time it took, which stands in for a ping. A Cube Lite in direct mode answers
+nothing there, not even a query of its power, so there is nothing to ask. A
+change in how that goes, such as the port refusing a connection or taking none,
+is logged when it happens. No status line is logged while nothing flows, but
+the tries go on, and a change in them is still logged.
+
+Run under Docker, keep the log somewhere that outlives the container, such
+as the journal with `--log-driver journald`: the default log goes with the
+container when it is recreated, and the record with it.
 
 ## What it does with the lamp
 
@@ -121,14 +150,23 @@ rather than anything here.
   again after a pause of more than 150 seconds, by when the old one has
   certainly expired. The new session turns direct mode on afresh, in case the
   lamp's app or Home Assistant gave the lamp something else to show meanwhile.
+- When the lamp refuses frames as illegal requests, which it does once
+  something else, such as its app, Home Assistant or a Matter controller, has
+  given it an effect of its own, says so and turns direct mode on again in
+  the same session, trying every 5 seconds until the lamp confirms it. It has
+  done this a few minutes after being power-cycled, while frames flowed.
 - When the lamp does not open a session at all, says so once, drops frames,
   tries again every 5 seconds, and says when the lamp is back.
 - When the lamp hangs anyway, nothing sent over the network brings it back:
   power-cycle it. A hung lamp's display stops, it answers handshakes and
   keep-alives but no other command, and its sessions end after about a
   minute, so the bridge logs one session after another that did not confirm
-  direct mode. In testing it hung on a weak power supply, and under heavy
-  2.4 GHz interference at 30 frames a second, which 15 rode out.
+  direct mode. Seen once: while frames went on arriving, a hung lamp also
+  dropped off the network for about half a minute at a time, which it stopped
+  doing while they were held back. In testing it hung on a weak power supply,
+  and under heavy 2.4 GHz interference at 30 frames a second, which 15 rode
+  out; it has also hung at 15 a second, after anything from minutes to
+  hours. `--stats` records what led up to one.
 
 The lamp keeps showing the last frame after the bridge stops, until it is
 given something else to show from its app or Home Assistant.
@@ -159,7 +197,8 @@ bash ./check.sh
 This is what CI runs. It needs nothing installed and no lamp: the tests run
 the bridge against a stand-in lamp on the loopback address, on ports the
 operating system picks, which keeps to what the real one does, down to
-refusing a token it no longer knows and never answering a frame.
+refusing a token it no longer knows, never answering a frame in direct mode,
+and refusing one outside it.
 
 They cover:
 - a frame from LedFx shown the right way up, in a session in direct mode, and
@@ -178,11 +217,16 @@ They cover:
   frame, and a new one opened with direct mode on again;
 - a lamp that stops answering keep-alives, or never confirms direct mode,
   keeping its one session, with a warning;
+- a lamp taken out of direct mode, put back in it in the same session;
 - a fresh session after a pause;
 - a first frame that fails to send, retried in the session just opened;
 - a lamp that opens no session, tried again until it does;
+- the status line while frames flow, its counts of frames, keep-alives,
+  answers and errors, and no line while nothing does;
+- the TCP probe against a port that takes the connection, one that refuses
+  it and a lamp that is gone, sending nothing, and logging only a change;
 - the frame fitting in one of the lamp's datagrams, and the test pattern;
-- `--test` against a lamp and against no lamp, a port in use, and no lamp
-  address given.
+- `--test` against a lamp and against no lamp, a port in use, no lamp
+  address given, and a `--stats` interval that is too short.
 
-They take about nine seconds.
+They take about twelve seconds, or about sixteen on Windows.
