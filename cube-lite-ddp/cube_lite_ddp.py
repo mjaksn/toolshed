@@ -71,8 +71,9 @@ LAMP_PORT = 55444
 # The lamp answers every datagram up to 30 a second and loses about half of
 # them at 40, so nothing is sent to it faster than this. LedFx sends 60 frames
 # a second by default; the ones in between are dropped, never queued, so what
-# the lamp shows is never behind.
-MIN_SEND_INTERVAL = 1 / 30
+# the lamp shows is never behind. --max-fps can send it fewer.
+MAX_FPS = 30
+MIN_SEND_INTERVAL = 1 / MAX_FPS
 # The lamp drops a datagram bigger than this. A frame is about 480 bytes.
 MAX_DATAGRAM = 760
 # How long to wait for the answer to the commands that set a session up.
@@ -491,10 +492,14 @@ class Bridge:
 
     def __init__(
         self, lamp: Lamp, host: str = "0.0.0.0", port: int = DDP_PORT, origin: str = "top-left",
-        stats_every: float = 0.0, probe: TcpProbe | None = None,
+        stats_every: float = 0.0, probe: TcpProbe | None = None, max_fps: int = MAX_FPS,
     ) -> None:
         self.lamp = lamp
         self.origin = origin
+        # Frames go to the lamp no more often than this, on a steady beat;
+        # the lamp's own limit, which keep-alives share, applies as well.
+        self.frame_interval = 1 / max_fps
+        self._next_frame = float("-inf")
         # A status line every stats_every seconds while anything flows; none
         # when it is 0. The probe's latest answer goes on the end of it.
         self.stats_every = stats_every
@@ -558,7 +563,7 @@ class Bridge:
 
     def _forward(self) -> None:
         now = time.monotonic()
-        if self._pending is None or now < self._retry_at or now < self.lamp.next_send():
+        if self._pending is None or now < max(self._retry_at, self._next_frame, self.lamp.next_send()):
             return
         frame, self._pending = self._pending, None
         try:
@@ -576,6 +581,12 @@ class Bridge:
         if self._failing:
             LOG.info("The lamp at %s is answering again", self.lamp.ip)
             self._failing = False
+        # Keep to the beat while frames keep coming, so that a frame sent a
+        # little late does not slow the rate; after a pause, start it afresh.
+        if now - self._next_frame < self.frame_interval:
+            self._next_frame += self.frame_interval
+        else:
+            self._next_frame = now + self.frame_interval
         self.frames_shown += 1
         self.frames_sent += 1
         self._level_total += sum(frame)
@@ -626,7 +637,7 @@ class Bridge:
     def step(self, wait: float = 0.25) -> None:
         """Wait up to ``wait`` seconds for something to do, then do it."""
         if self._pending is not None:
-            due = max(self.lamp.next_send(), self._retry_at) - time.monotonic()
+            due = max(self.lamp.next_send(), self._retry_at, self._next_frame) - time.monotonic()
             wait = max(0.0, min(wait, due))
         readable, _, _ = select.select([self.sock, self.lamp.sock], [], [], wait)
         if self.sock in readable:
@@ -765,13 +776,15 @@ def run_test(ip: str, origin: str) -> int:
     return 0
 
 
-def run_bridge(ip: str, host: str, port: int, origin: str, stats_every: float = 0.0) -> int:
+def run_bridge(
+    ip: str, host: str, port: int, origin: str, stats_every: float = 0.0, max_fps: int = MAX_FPS,
+) -> int:
     lamp = open_lamp(ip)
     if lamp is None:
         return 1
     probe = TcpProbe(ip, stats_every) if stats_every else None
     try:
-        bridge = Bridge(lamp, host, port, origin, stats_every, probe)
+        bridge = Bridge(lamp, host, port, origin, stats_every, probe, max_fps)
     except OSError as err:
         lamp.close()
         print(f"Cannot listen on {host}:{port}: {err}", file=sys.stderr)
@@ -781,6 +794,8 @@ def run_bridge(ip: str, host: str, port: int, origin: str, stats_every: float = 
         "Listening for DDP on %s, port %d, and showing it on the Cube Lite at %s. Ctrl+C stops it.",
         where, bridge.port, ip,
     )
+    if max_fps < MAX_FPS:
+        LOG.info("Sending the lamp at most %d frames a second.", max_fps)
     if probe is not None:
         probe.start()
     try:
@@ -832,9 +847,18 @@ def main(argv: list[str] | None = None) -> int:
             f"at least {MIN_STATS_EVERY:g})"
         ),
     )
+    parser.add_argument(
+        "--max-fps", type=int, default=MAX_FPS, metavar="N",
+        help=(
+            f"send the lamp at most N frames a second, from 1 to {MAX_FPS} "
+            "(default: %(default)s, as many as it takes)"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.stats and not args.stats >= MIN_STATS_EVERY:
         parser.error(f"--stats takes at least {MIN_STATS_EVERY:g} seconds, or 0 for none")
+    if not 1 <= args.max_fps <= MAX_FPS:
+        parser.error(f"--max-fps takes from 1 to {MAX_FPS}")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     if args.discover:
@@ -843,7 +867,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("give the lamp's IP address, or use --discover to find it")
     if args.test:
         return run_test(args.lamp, args.origin)
-    return run_bridge(args.lamp, args.listen, args.port, args.origin, args.stats)
+    return run_bridge(args.lamp, args.listen, args.port, args.origin, args.stats, args.max_fps)
 
 
 if __name__ == "__main__":
