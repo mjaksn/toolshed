@@ -34,7 +34,10 @@ Assistant integration, which takes a whole frame of pixels at a time and up to
   one hang may have come from the interference rather than the second
   session, so a session is never given up because the lamp is quiet, which
   over Wi-Fi it can be for seconds at a time, only when the lamp refuses it,
-  or when it has certainly expired.
+  or when it has certainly expired. It has also hung at 15 frames a second
+  after anything from minutes to hours, and once hung, it dropped off the
+  network for about half a minute at a time while frames went on arriving;
+  ``--stats`` records what leads up to a hang.
 """
 
 from __future__ import annotations
@@ -100,6 +103,16 @@ RESTART_AFTER = 150.0
 RETRY_AFTER = 5.0
 # What the lamp answers a token it does not know with.
 TOKEN_REFUSED = -1
+# A keep-alive still unanswered after this long is taken as lost, and no
+# longer waited for.
+ANSWER_GIVEN_UP_AFTER = 60.0
+
+# The lamp's documented LAN protocol, whose port --stats tries. A hung lamp
+# has refused or dropped connections here, so it tells a hang from a quiet link.
+TCP_PORT = 55443
+PROBE_TIMEOUT = 3.0
+# --stats takes no shorter interval than this, to keep the probes gentle.
+MIN_STATS_EVERY = 5.0
 
 # Where Yeelight lamps listen for discovery, and what they answer.
 DISCOVERY_ADDRESS = ("239.255.255.250", 1982)
@@ -194,9 +207,39 @@ class Lamp:
         self._last_keep_alive = float("-inf")
         self._opened_at = float("-inf")
         self._silent = False
+        # For the status line: the last message ID sent, the keep-alives still
+        # waiting for an answer by message ID, and counts since it was last
+        # taken.
+        self.last_id = 0
+        self._waiting: dict[int, float] = {}
+        self._reset_counts()
+
+    def _reset_counts(self) -> None:
+        self.keep_alives_sent = 0
+        self.keep_alives_answered = 0
+        self.slowest_answer: float | None = None
+        self.errors = 0
 
     def close(self) -> None:
         self.sock.close()
+
+    def counts(self) -> dict:
+        """What the status line reports about the lamp, counted since this was
+        last called, which starts the counts afresh."""
+        now = time.monotonic()
+        self._waiting = {i: t for i, t in self._waiting.items() if now - t < ANSWER_GIVEN_UP_AFTER}
+        counts = {
+            "session": self.sessions if self.token is not None else None,
+            "age": now - self._opened_at if self.token is not None else None,
+            "last_id": self.last_id,
+            "keep_alives_sent": self.keep_alives_sent,
+            "keep_alives_answered": self.keep_alives_answered,
+            "slowest_answer": self.slowest_answer,
+            "errors": self.errors,
+            "quiet": now - self._last_answer if self._last_answer > float("-inf") else None,
+        }
+        self._reset_counts()
+        return counts
 
     def next_send(self) -> float:
         """The earliest time.monotonic() at which the lamp may be sent anything."""
@@ -216,6 +259,7 @@ class Lamp:
         except OSError as err:
             raise LampError(f"cannot send to the lamp at {self.ip}: {err}") from err
         self._last_send = time.monotonic()
+        self.last_id = message["id"]
 
     def _messages(self) -> list[dict]:
         """Every message waiting from the lamp, without blocking."""
@@ -234,7 +278,18 @@ class Lamp:
                     continue
                 if isinstance(message, dict):
                     self._heard()
+                    self._count(message)
                     found.append(message)
+
+    def _count(self, message: dict) -> None:
+        message_id = message.get("id")
+        sent = self._waiting.pop(message_id, None) if isinstance(message_id, int) else None
+        if sent is not None:
+            self.keep_alives_answered += 1
+            delay = time.monotonic() - sent
+            self.slowest_answer = delay if self.slowest_answer is None else max(self.slowest_answer, delay)
+        if "error" in message:
+            self.errors += 1
 
     def _heard(self) -> None:
         self._last_answer = time.monotonic()
@@ -334,11 +389,14 @@ class Lamp:
             self.open()
             return
         if now - self._last_keep_alive >= KEEP_ALIVE_EVERY:
+            message_id = next(self._ids)
             self._send({
-                "id": next(self._ids), "method": "udp_sess_keep_alive",
+                "id": message_id, "method": "udp_sess_keep_alive",
                 "params": KEEP_ALIVE, "token": self.token,
             })
             self._last_keep_alive = time.monotonic()
+            self._waiting[message_id] = self._last_keep_alive
+            self.keep_alives_sent += 1
         quiet = now - max(self._last_answer, self._opened_at)
         if quiet > SILENT_WARN_AFTER and not self._silent:
             LOG.warning(
@@ -359,9 +417,19 @@ class Lamp:
 class Bridge:
     """Takes DDP frames on a UDP port and shows them on a lamp."""
 
-    def __init__(self, lamp: Lamp, host: str = "0.0.0.0", port: int = DDP_PORT, origin: str = "top-left") -> None:
+    def __init__(
+        self, lamp: Lamp, host: str = "0.0.0.0", port: int = DDP_PORT, origin: str = "top-left",
+        stats_every: float = 0.0, probe: TcpProbe | None = None,
+    ) -> None:
         self.lamp = lamp
         self.origin = origin
+        # A status line every stats_every seconds while anything flows; none
+        # when it is 0. The probe's latest answer goes on the end of it.
+        self.stats_every = stats_every
+        self.probe = probe
+        self._stats_due = time.monotonic() + stats_every
+        self._last_packet: float | None = None
+        self._reset_counts()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             self.sock.bind((host, port))
@@ -382,15 +450,30 @@ class Bridge:
     def close(self) -> None:
         self.sock.close()
 
+    def _reset_counts(self) -> None:
+        self.frames_in = 0
+        self.frames_dropped = 0
+        self.frames_sent = 0
+        self.longest_gap: float | None = None
+        self._level_total = 0
+
     def receive(self, packet: bytes) -> None:
         parsed = parse_ddp(packet)
         if parsed is None:
             return
+        now = time.monotonic()
+        if self._last_packet is not None:
+            gap = now - self._last_packet
+            self.longest_gap = gap if self.longest_gap is None else max(self.longest_gap, gap)
+        self._last_packet = now
         offset, data, push = parsed
         if offset < FRAME_BYTES:
             chunk = data[:FRAME_BYTES - offset]
             self._buffer[offset:offset + len(chunk)] = chunk
         if push:
+            self.frames_in += 1
+            if self._pending is not None:
+                self.frames_dropped += 1
             self._pending = bytes(self._buffer)
 
     def _read_ddp(self) -> None:
@@ -422,6 +505,51 @@ class Bridge:
             LOG.info("The lamp at %s is answering again", self.lamp.ip)
             self._failing = False
         self.frames_shown += 1
+        self.frames_sent += 1
+        self._level_total += sum(frame)
+
+    def status_line(self) -> str | None:
+        """The status line for the time since the last one, or None when
+        nothing came or went in it. Starts the counts afresh either way."""
+        lamp = self.lamp.counts()
+        bridge = {
+            "frames_in": self.frames_in, "frames_dropped": self.frames_dropped,
+            "frames_sent": self.frames_sent, "longest_gap": self.longest_gap,
+            "level": self._level_total / (self.frames_sent * FRAME_BYTES * 255) if self.frames_sent else None,
+        }
+        self._reset_counts()
+        if not (bridge["frames_in"] or bridge["frames_sent"] or lamp["keep_alives_sent"]):
+            return None
+
+        def seconds(value: float | None) -> str:
+            return "none" if value is None else f"{value:.3f} s"
+
+        parts = [
+            (
+                f"from LedFx {bridge['frames_in']} frames, longest gap {seconds(bridge['longest_gap'])}, "
+                f"{bridge['frames_dropped']} dropped"
+            ),
+            f"to the lamp {bridge['frames_sent']} frames"
+            + ("" if bridge["level"] is None else f" at {bridge['level']:.0%} level"),
+            "no session" if lamp["session"] is None
+            else f"session {lamp['session']}, {lamp['age']:.0f} s old",
+            f"message ID {lamp['last_id']}",
+            (
+                f"keep-alives {lamp['keep_alives_sent']} sent, {lamp['keep_alives_answered']} answered, "
+                f"slowest {seconds(lamp['slowest_answer'])}"
+            ),
+            "never heard from" if lamp["quiet"] is None else f"last heard {lamp['quiet']:.1f} s ago",
+            f"{lamp['errors']} errors",
+        ]
+        if self.probe is not None:
+            parts.append(f"TCP {self.probe.port} {self.probe.latest}")
+        return "Status: " + "; ".join(parts)
+
+    def _report(self) -> None:
+        self._stats_due = time.monotonic() + self.stats_every
+        line = self.status_line()
+        if line is not None:
+            LOG.info(line)
 
     def step(self, wait: float = 0.25) -> None:
         """Wait up to ``wait`` seconds for something to do, then do it."""
@@ -434,10 +562,57 @@ class Bridge:
         if self.lamp.sock in readable:
             self.lamp.drain()
         self._forward()
+        if self.stats_every and time.monotonic() >= self._stats_due:
+            self._report()
 
     def run(self, stop: threading.Event | None = None) -> None:
         while stop is None or not stop.is_set():
             self.step()
+
+
+def probe_tcp(ip: str, port: int = TCP_PORT, timeout: float = PROBE_TIMEOUT) -> tuple[str, str]:
+    """Open and close a connection to the lamp's documented TCP port, sending
+    nothing. Returns how it went, ``open``, ``refused`` or ``unreachable``, and
+    a description for the log; ``open`` gives the time the connection took,
+    which stands in for a ping. The lamp takes commands there, but a Cube Lite
+    in direct mode leaves even get_prop unanswered, so there is nothing to ask."""
+    start = time.monotonic()
+    try:
+        sock = socket.create_connection((ip, port), timeout)
+    except ConnectionRefusedError:
+        return "refused", "refused the connection"
+    except OSError as err:
+        return "unreachable", f"took no connection ({err})"
+    sock.close()
+    return "open", f"open ({(time.monotonic() - start) * 1000:.0f} ms)"
+
+
+class TcpProbe(threading.Thread):
+    """Tries the lamp's TCP port every so often, away from the bridge's own
+    loop, logging each change in how it went."""
+
+    def __init__(self, ip: str, every: float, port: int = TCP_PORT, timeout: float = PROBE_TIMEOUT) -> None:
+        super().__init__(daemon=True)
+        self.ip = ip
+        self.every = every
+        self.port = port
+        self.timeout = timeout
+        self.latest = "not asked yet"
+        self._halt = threading.Event()
+
+    def stop(self) -> None:
+        self._halt.set()
+
+    def run(self) -> None:
+        last_kind = None
+        while not self._halt.is_set():
+            kind, text = probe_tcp(self.ip, self.port, self.timeout)
+            self.latest = text
+            if kind != last_kind:
+                level = logging.INFO if kind == "open" else logging.WARNING
+                LOG.log(level, "The lamp's TCP port %d %s", self.port, text)
+                last_kind = kind
+            self._halt.wait(self.every)
 
 
 def discover(wait: float = 3.0) -> list[dict[str, str]]:
@@ -518,12 +693,13 @@ def run_test(ip: str, origin: str) -> int:
     return 0
 
 
-def run_bridge(ip: str, host: str, port: int, origin: str) -> int:
+def run_bridge(ip: str, host: str, port: int, origin: str, stats_every: float = 0.0) -> int:
     lamp = open_lamp(ip)
     if lamp is None:
         return 1
+    probe = TcpProbe(ip, stats_every) if stats_every else None
     try:
-        bridge = Bridge(lamp, host, port, origin)
+        bridge = Bridge(lamp, host, port, origin, stats_every, probe)
     except OSError as err:
         lamp.close()
         print(f"Cannot listen on {host}:{port}: {err}", file=sys.stderr)
@@ -533,11 +709,15 @@ def run_bridge(ip: str, host: str, port: int, origin: str) -> int:
         "Listening for DDP on %s, port %d, and showing it on the Cube Lite at %s. Ctrl+C stops it.",
         where, bridge.port, ip,
     )
+    if probe is not None:
+        probe.start()
     try:
         bridge.run()
     except KeyboardInterrupt:
         LOG.info("Stopped after showing %d frames.", bridge.frames_shown)
     finally:
+        if probe is not None:
+            probe.stop()
         bridge.close()
         lamp.close()
     return 0
@@ -572,7 +752,17 @@ def main(argv: list[str] | None = None) -> int:
         "--origin", choices=("top-left", "bottom-left"), default="top-left",
         help="where the first pixel of a frame belongs (default: %(default)s, LedFx's matrix order)",
     )
+    parser.add_argument(
+        "--stats", type=float, default=0.0, metavar="SECONDS",
+        help=(
+            "log a status line every SECONDS while frames flow, and try the lamp's TCP port "
+            f"{TCP_PORT} as often, for tracking down a hang (default: off; "
+            f"at least {MIN_STATS_EVERY:g})"
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.stats and not args.stats >= MIN_STATS_EVERY:
+        parser.error(f"--stats takes at least {MIN_STATS_EVERY:g} seconds, or 0 for none")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     if args.discover:
@@ -581,7 +771,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("give the lamp's IP address, or use --discover to find it")
     if args.test:
         return run_test(args.lamp, args.origin)
-    return run_bridge(args.lamp, args.listen, args.port, args.origin)
+    return run_bridge(args.lamp, args.listen, args.port, args.origin, args.stats)
 
 
 if __name__ == "__main__":

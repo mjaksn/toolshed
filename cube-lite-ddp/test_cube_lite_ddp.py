@@ -16,6 +16,7 @@ import threading
 import time
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest import mock
 
 import cube_lite_ddp as cube
@@ -130,13 +131,15 @@ class BridgeTest(unittest.TestCase):
     """A bridge running in a thread, between a DDP sender and a stand-in lamp."""
 
     origin = "top-left"
+    stats_every = 0.0
+    probe = None
 
     def setUp(self) -> None:
         logging.getLogger("cube_lite_ddp").setLevel(logging.CRITICAL)
         self.fake = FakeLamp()
         self.fake.start()
         self.lamp = cube.Lamp(LOOPBACK, self.fake.port)
-        self.bridge = cube.Bridge(self.lamp, LOOPBACK, 0, self.origin)
+        self.bridge = cube.Bridge(self.lamp, LOOPBACK, 0, self.origin, self.stats_every, self.probe)
         self.sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.stopping = threading.Event()
         self.thread = threading.Thread(target=self.bridge.run, args=(self.stopping,), daemon=True)
@@ -354,6 +357,144 @@ class SessionTest(BridgeTest):
         self.assertFalse(self.bridge._failing)
 
 
+class StatusTest(BridgeTest):
+    stats_every = 0.3
+    probe = SimpleNamespace(port=55443, latest="open (2 ms)")
+
+    def test_status_line_while_frames_flow(self):
+        with mock.patch.object(cube, "KEEP_ALIVE_EVERY", 0.1), \
+                self.assertLogs("cube_lite_ddp", "INFO") as logs:
+            end = time.monotonic() + 1.0
+            while time.monotonic() < end:
+                self.send(ddp(rows_frame(ROW_COLOURS)))
+                time.sleep(0.05)
+            self.assertTrue(wait_for(lambda: any("Status:" in line for line in logs.output)))
+        line = next(line for line in logs.output if "Status:" in line)
+        self.assertRegex(line, r"from LedFx [1-9]\d* frames, longest gap 0\.\d+ s, \d+ dropped")
+        # Rows of red at 10 to 50 out of 255, a third of each pixel lit.
+        self.assertRegex(line, r"to the lamp [1-9]\d* frames at 4% level")
+        self.assertRegex(line, r"session 1, \d+ s old; message ID [1-9]")
+        self.assertRegex(line, r"keep-alives [1-9]\d* sent, [1-9]\d* answered, slowest 0\.\d+ s")
+        self.assertIn("0 errors; TCP 55443 open (2 ms)", line)
+
+    def test_no_status_line_while_nothing_flows(self):
+        with self.assertNoLogs("cube_lite_ddp", "INFO"):
+            time.sleep(0.8)
+
+
+class CountsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        logging.getLogger("cube_lite_ddp").setLevel(logging.CRITICAL)
+        self.fake = FakeLamp()
+        self.fake.start()
+        self.lamp = cube.Lamp(LOOPBACK, self.fake.port)
+
+    def tearDown(self) -> None:
+        self.lamp.close()
+        self.fake.stop()
+
+    def test_keep_alive_answers_and_refusals_are_counted(self):
+        frame = rows_frame(ROW_COLOURS)
+        with mock.patch.object(cube, "KEEP_ALIVE_EVERY", 0):
+            self.lamp.send_frame(frame)
+            self.lamp.send_frame(frame)
+            self.assertTrue(wait_for(lambda: (self.lamp.drain(), self.lamp.keep_alives_answered)[1] >= 1))
+            counts = self.lamp.counts()
+            self.assertEqual(counts["session"], 1)
+            self.assertGreaterEqual(counts["keep_alives_sent"], counts["keep_alives_answered"])
+            self.assertIsNotNone(counts["slowest_answer"])
+            self.assertEqual(counts["errors"], 0)
+            self.assertEqual(counts["last_id"], self.lamp.last_id)
+            # Taking them starts them afresh.
+            self.assertEqual(self.lamp.counts()["keep_alives_answered"], 0)
+            self.fake.forget_tokens()
+            self.lamp.send_frame(frame)
+            self.assertTrue(wait_for(lambda: (self.lamp.drain(), self.lamp.token)[1] is None))
+        counts = self.lamp.counts()
+        self.assertGreaterEqual(counts["errors"], 1)
+        self.assertIsNone(counts["session"])
+
+
+class FakeTcpLamp(threading.Thread):
+    """The lamp's TCP port: takes connections, counts them, and says nothing,
+    as a Cube Lite in direct mode does."""
+
+    def __init__(self) -> None:
+        super().__init__(daemon=True)
+        self.server = socket.create_server((LOOPBACK, 0))
+        self.server.settimeout(0.05)
+        self.port = self.server.getsockname()[1]
+        self.connections = 0
+        self.received = b""
+        self._halt = threading.Event()
+
+    def stop(self) -> None:
+        self._halt.set()
+        self.join()
+        self.server.close()
+
+    def run(self) -> None:
+        while not self._halt.is_set():
+            try:
+                conn, _ = self.server.accept()
+            except OSError:
+                continue
+            with conn:
+                self.connections += 1
+                conn.settimeout(0.2)
+                try:
+                    self.received += conn.recv(4096)
+                except OSError:
+                    pass
+
+
+class ProbeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        logging.getLogger("cube_lite_ddp").setLevel(logging.CRITICAL)
+
+    def test_open_port_is_timed_and_sent_nothing(self):
+        fake = FakeTcpLamp()
+        fake.start()
+        try:
+            kind, text = cube.probe_tcp(LOOPBACK, fake.port, timeout=1)
+            self.assertTrue(wait_for(lambda: fake.connections == 1))
+        finally:
+            fake.stop()
+        self.assertEqual(kind, "open")
+        self.assertRegex(text, r"^open \(\d+ ms\)$")
+        self.assertEqual(fake.received, b"")
+
+    def test_refused_connection(self):
+        closed = socket.create_server((LOOPBACK, 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        self.assertEqual(cube.probe_tcp(LOOPBACK, port, timeout=3)[0], "refused")
+
+    def test_unreachable_lamp(self):
+        with mock.patch("socket.create_connection", side_effect=TimeoutError("timed out")):
+            kind, text = cube.probe_tcp("192.0.2.1")
+        self.assertEqual((kind, text), ("unreachable", "took no connection (timed out)"))
+
+    def test_probe_logs_only_a_change(self):
+        fake = FakeTcpLamp()
+        fake.start()
+        probe = cube.TcpProbe(LOOPBACK, 0.05, fake.port, timeout=1)
+        try:
+            with self.assertLogs("cube_lite_ddp", "INFO") as logs:
+                probe.start()
+                self.assertTrue(wait_for(lambda: fake.connections >= 3))
+                fake.stop()
+                # Refused on Linux; on Windows, which retries a refused
+                # connection for about two seconds, the timeout comes first.
+                self.assertTrue(wait_for(lambda: not probe.latest.startswith("open"), timeout=5))
+        finally:
+            probe.stop()
+            probe.join()
+        self.assertEqual(len(logs.output), 2, logs.output)
+        self.assertRegex(logs.output[0], r"^INFO:cube_lite_ddp:The lamp's TCP port \d+ open \(\d+ ms\)$")
+        self.assertRegex(logs.output[1], r"^WARNING:cube_lite_ddp:The lamp's TCP port \d+ (refused|took no)")
+
+
 class PieceTest(unittest.TestCase):
     def test_parse_ddp(self):
         self.assertEqual(cube.parse_ddp(ddp(b"abc", offset=6)), (6, b"abc", True))
@@ -395,6 +536,12 @@ class CommandLineTest(unittest.TestCase):
         finally:
             taken.close()
         self.assertEqual(code, 1)
+
+    def test_stats_interval_too_short_is_refused(self):
+        for value in ("1", "-1", "nan"):
+            with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
+                cube.main([LOOPBACK, "--stats", value])
+            self.assertEqual(raised.exception.code, 2, value)
 
     def test_lamp_is_required(self):
         with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
