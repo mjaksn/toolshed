@@ -45,6 +45,9 @@ class FakeLamp(threading.Thread):
         # Methods the lamp acts on but never answers, as when an answer is
         # lost on the way.
         self.unanswered: set[str] = set()
+        # Methods answered with an error the lamp's protocol does not explain,
+        # by method: the error to answer with.
+        self.odd_errors: dict[str, dict] = {}
         self._halt = threading.Event()
 
     def stop(self) -> None:
@@ -85,6 +88,8 @@ class FakeLamp(threading.Thread):
         token = message.get("token")
         if token not in self.tokens:
             return {"id": message["id"], "error": {"code": -1, "message": "invalid parameter"}}
+        if method in self.odd_errors:
+            return {"id": message["id"], "error": self.odd_errors[method], "token": token}
         if method == "activate_fx_mode":
             if message["params"] == [{"mode": "direct"}]:
                 self.direct.add(token)
@@ -333,6 +338,26 @@ class SessionTest(BridgeTest):
         output = "\n".join(logs.output)
         self.assertIn("refusing frames as illegal requests", output)
         self.assertIn("Direct mode is on again.", output)
+
+    def test_unexplained_errors_are_logged_once_a_session_with_what_they_answered(self):
+        self.send(ddp(rows_frame(ROW_COLOURS)))
+        self.shown(1)
+        with self.fake.lock:
+            self.fake.odd_errors = {
+                "update_leds": {"code": -5000, "message": "queue full"},
+                "udp_sess_keep_alive": {"code": 9, "message": "busy"},
+            }
+        with mock.patch.object(cube, "KEEP_ALIVE_EVERY", 0.1), \
+                self.assertLogs("cube_lite_ddp", "WARNING") as logs:
+            self.stream(0.8)
+            self.assertTrue(wait_for(lambda: len(logs.output) >= 2))
+            time.sleep(0.2)
+        output = "\n".join(logs.output)
+        self.assertEqual(len(logs.output), 2, output)
+        self.assertRegex(output, r"message \d+, update_leds, with an error .*queue full")
+        self.assertRegex(output, r"message \d+, udp_sess_keep_alive, with an error .*busy")
+        self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+        self.assertIsNotNone(self.lamp.token)
 
     def test_stream_after_a_pause_opens_a_fresh_session(self):
         with mock.patch.object(cube, "RESTART_AFTER", 0.2):
