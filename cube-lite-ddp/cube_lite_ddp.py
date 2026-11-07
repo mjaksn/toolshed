@@ -18,7 +18,10 @@ Assistant integration, which takes a whole frame of pixels at a time and up to
 - ``activate_fx_mode`` with ``{"mode": "direct"}`` puts the lamp in direct mode,
   for that session only;
 - ``update_leds`` carries a frame as base64 of the R, G, B bytes of its 100
-  pixels, row by row from the bottom left, and is never answered;
+  pixels, row by row from the bottom left, and is never answered in direct
+  mode. Once something else has given the lamp an effect of its own, each
+  frame is answered with error code 6, "illegal request", and asking for
+  direct mode again in the same session puts it back;
 - a session ends about four keep-alive intervals after its last
   ``udp_sess_keep_alive``, frames not counting: about 40 seconds with the
   interval of 10 that this sets, about two minutes with none set. After that
@@ -103,6 +106,9 @@ RESTART_AFTER = 150.0
 RETRY_AFTER = 5.0
 # What the lamp answers a token it does not know with.
 TOKEN_REFUSED = -1
+# What it answers a frame with when its session is no longer in direct mode,
+# as when something else has given the lamp an effect of its own to show.
+ILLEGAL_REQUEST = 6
 # A keep-alive still unanswered after this long is taken as lost, and no
 # longer waited for.
 ANSWER_GIVEN_UP_AFTER = 60.0
@@ -207,6 +213,13 @@ class Lamp:
         self._last_keep_alive = float("-inf")
         self._opened_at = float("-inf")
         self._silent = False
+        # Set when the lamp refuses a frame because its session has left direct
+        # mode; direct mode is then asked for again, in the same session, no
+        # sooner than _reactivate_at.
+        self._left_direct = False
+        self._reactivate_at = float("-inf")
+        # The message ID direct mode was last asked for with.
+        self._direct_from = 0
         # For the status line: the last message ID sent, the keep-alives still
         # waiting for an answer by message ID, and counts since it was last
         # taken.
@@ -299,18 +312,32 @@ class Lamp:
 
     def _note(self, message: dict) -> None:
         """Act on a message nobody was waiting for. A refused token in the
-        current session means the lamp has ended it."""
+        current session means the lamp has ended it; a frame refused as an
+        illegal request, that the session has left direct mode."""
         error = message.get("error")
         message_id = message.get("id")
         if (
-            self.token is not None
-            and isinstance(error, dict)
-            and error.get("code") == TOKEN_REFUSED
-            and isinstance(message_id, int)
-            and message_id >= self._session_from
+            self.token is None
+            or not isinstance(error, dict)
+            or not isinstance(message_id, int)
+            or message_id < self._session_from
         ):
+            return
+        if error.get("code") == TOKEN_REFUSED:
             LOG.info("The lamp ended the session. The next frame opens a new one.")
             self.token = None
+        elif (
+            error.get("code") == ILLEGAL_REQUEST
+            and not self._left_direct
+            # Not a refusal of a frame sent before direct mode was last asked for.
+            and message_id > self._direct_from
+        ):
+            LOG.warning(
+                "The lamp is refusing frames as illegal requests: something has taken it out "
+                "of direct mode, such as its app, Home Assistant or a Matter controller. "
+                "Turning direct mode on again in the same session."
+            )
+            self._left_direct = True
 
     def drain(self) -> None:
         """Read whatever the lamp sent unasked, keep-alive answers among it."""
@@ -358,10 +385,12 @@ class Lamp:
             raise LampError(f"the lamp at {self.ip} did not open a session")
         self.token = token
         self._session_from = first
+        self._left_direct = False
         self._opened_at = time.monotonic()
         self._last_keep_alive = self._opened_at
         self.sessions += 1
         answer = self.request("activate_fx_mode", [{"mode": "direct"}])
+        self._direct_from = self.last_id
         if answer is None:
             # Most likely the answer was lost. Opening another session to ask
             # again is what can freeze the lamp, so this one is kept: its
@@ -377,6 +406,22 @@ class Lamp:
             raise LampError(f"the lamp at {self.ip} refused direct mode: {answer['error']}")
         LOG.info("Opened a session with the lamp at %s, in direct mode", self.ip)
 
+    def _reactivate(self) -> None:
+        """Ask for direct mode again in the session the lamp has taken out of
+        it. A new session is not opened for this: see the module docstring."""
+        answer = self.request("activate_fx_mode", [{"mode": "direct"}])
+        self._direct_from = self.last_id
+        if answer is not None and "error" not in answer:
+            LOG.info("Direct mode is on again.")
+            self._left_direct = False
+            return
+        # Refused, or unanswered; a refused token has already ended the
+        # session, and the next frame opens a new one in direct mode.
+        if self.token is None:
+            self._left_direct = False
+            return
+        self._reactivate_at = time.monotonic() + RETRY_AFTER
+
     def _prepare(self) -> None:
         """Make sure the next frame goes to a session that is alive, and keep
         it alive."""
@@ -388,6 +433,10 @@ class Lamp:
         if self.token is None or idle > RESTART_AFTER:
             self.open()
             return
+        if self._left_direct and now >= self._reactivate_at:
+            self._reactivate()
+            if self.token is None:
+                return
         if now - self._last_keep_alive >= KEEP_ALIVE_EVERY:
             message_id = next(self._ids)
             self._send({

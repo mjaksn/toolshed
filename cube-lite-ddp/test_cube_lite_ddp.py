@@ -2,7 +2,8 @@
 
 The stand-in keeps to what the real lamp does: a session token from
 udp_sess_new, direct mode per session, error -1 for a token it does not know,
-and no answer at all to update_leds. Run with ``python -m unittest``.
+no answer at all to update_leds in direct mode, and error 6 to one outside
+it. Run with ``python -m unittest``.
 """
 
 from __future__ import annotations
@@ -91,8 +92,12 @@ class FakeLamp(threading.Thread):
         if method == "udp_sess_keep_alive":
             return {"id": message["id"], "result": ["ok"], "token": token}
         if method == "update_leds":
+            if token not in self.direct:
+                # As the real lamp does once something has taken it out of
+                # direct mode.
+                return {"id": message["id"], "error": {"code": 6, "message": "illegal request"}, "token": token}
             pixels = base64.b64decode(message["params"][0])
-            self.frames.append((time.monotonic(), token, token in self.direct, pixels))
+            self.frames.append((time.monotonic(), token, True, pixels))
             return None
         return {"id": message["id"], "error": {"code": -1, "message": "unsupported method"}}
 
@@ -310,6 +315,24 @@ class SessionTest(BridgeTest):
         self.assertEqual(len({f[1] for f in shown}), 1)
         self.assertTrue(all(direct for _, _, direct, _ in shown))
         self.assertIn("did not confirm direct mode", "\n".join(logs.output))
+
+    def test_lamp_taken_out_of_direct_mode_is_put_back_in_the_same_session(self):
+        with self.assertLogs("cube_lite_ddp", "INFO") as logs:
+            self.send(ddp(rows_frame(ROW_COLOURS)))
+            token = self.shown(1)[0][1]
+            with self.fake.lock:
+                self.fake.direct.clear()
+            later = rows_frame([(6, 6, 6)] * cube.ROWS)
+            end = time.monotonic() + 3
+            while time.monotonic() < end and not any(f[3] == later for f in self.fake.frames):
+                self.send(ddp(later))
+                time.sleep(0.05)
+        self.assertTrue(any(f[3] == later and f[1] == token for f in self.fake.frames), "not shown again")
+        self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+        self.assertEqual(self.fake.methods.count("activate_fx_mode"), 2)
+        output = "\n".join(logs.output)
+        self.assertIn("refusing frames as illegal requests", output)
+        self.assertIn("Direct mode is on again.", output)
 
     def test_stream_after_a_pause_opens_a_fresh_session(self):
         with mock.patch.object(cube, "RESTART_AFTER", 0.2):

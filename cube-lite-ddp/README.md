@@ -150,6 +150,11 @@ container when it is recreated, and the record with it.
   again after a pause of more than 150 seconds, by when the old one has
   certainly expired. The new session turns direct mode on afresh, in case the
   lamp's app or Home Assistant gave the lamp something else to show meanwhile.
+- When the lamp refuses frames as illegal requests, which it does once
+  something else, such as its app, Home Assistant or a Matter controller, has
+  given it an effect of its own, says so and turns direct mode on again in
+  the same session, trying every 5 seconds until the lamp confirms it. It has
+  done this a few minutes after being power-cycled, while frames flowed.
 - When the lamp does not open a session at all, says so once, drops frames,
   tries again every 5 seconds, and says when the lamp is back.
 - When the lamp hangs anyway, nothing sent over the network brings it back:
@@ -192,7 +197,8 @@ bash ./check.sh
 This is what CI runs. It needs nothing installed and no lamp: the tests run
 the bridge against a stand-in lamp on the loopback address, on ports the
 operating system picks, which keeps to what the real one does, down to
-refusing a token it no longer knows and never answering a frame.
+refusing a token it no longer knows, never answering a frame in direct mode,
+and refusing one outside it.
 
 They cover:
 - a frame from LedFx shown the right way up, in a session in direct mode, and
@@ -211,6 +217,7 @@ They cover:
   frame, and a new one opened with direct mode on again;
 - a lamp that stops answering keep-alives, or never confirms direct mode,
   keeping its one session, with a warning;
+- a lamp taken out of direct mode, put back in it in the same session;
 - a fresh session after a pause;
 - a first frame that fails to send, retried in the session just opened;
 - a lamp that opens no session, tried again until it does;
