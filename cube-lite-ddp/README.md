@@ -155,6 +155,9 @@ container when it is recreated, and the record with it.
   given it an effect of its own, says so and turns direct mode on again in
   the same session, trying every 5 seconds until the lamp confirms it. It has
   done this a few minutes after being power-cycled, while frames flowed.
+- Logs any other error the lamp answers with, the first time each comes in a
+  session, with the whole answer and the kind of message it answered; the
+  status line counts every one.
 - When the lamp does not open a session at all, says so once, drops frames,
   tries again every 5 seconds, and says when the lamp is back.
 - When the lamp hangs anyway, nothing sent over the network brings it back:
@@ -218,6 +221,8 @@ They cover:
 - a lamp that stops answering keep-alives, or never confirms direct mode,
   keeping its one session, with a warning;
 - a lamp taken out of direct mode, put back in it in the same session;
+- errors the protocol does not explain, logged once a session each, naming
+  what they answered;
 - a fresh session after a pause;
 - a first frame that fails to send, retried in the session just opened;
 - a lamp that opens no session, tried again until it does;
@@ -229,4 +234,4 @@ They cover:
 - `--test` against a lamp and against no lamp, a port in use, no lamp
   address given, and a `--stats` interval that is too short.
 
-They take about twelve seconds, or about sixteen on Windows.
+They take about thirteen seconds, or about seventeen on Windows.

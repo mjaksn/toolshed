@@ -225,6 +225,13 @@ class Lamp:
         # taken.
         self.last_id = 0
         self._waiting: dict[int, float] = {}
+        # The method and send time of each recent message that was not a
+        # frame, by message ID, to say what an error answered. Any ID missing
+        # from it was a frame.
+        self._sent: dict[int, tuple[str, float]] = {}
+        # The errors the bridge does not act on that have been logged in this
+        # session; each is logged once a session, and counted every time.
+        self._reported: set[str] = set()
         self._reset_counts()
 
     def _reset_counts(self) -> None:
@@ -241,6 +248,7 @@ class Lamp:
         last called, which starts the counts afresh."""
         now = time.monotonic()
         self._waiting = {i: t for i, t in self._waiting.items() if now - t < ANSWER_GIVEN_UP_AFTER}
+        self._sent = {i: s for i, s in self._sent.items() if now - s[1] < ANSWER_GIVEN_UP_AFTER}
         counts = {
             "session": self.sessions if self.token is not None else None,
             "age": now - self._opened_at if self.token is not None else None,
@@ -273,6 +281,8 @@ class Lamp:
             raise LampError(f"cannot send to the lamp at {self.ip}: {err}") from err
         self._last_send = time.monotonic()
         self.last_id = message["id"]
+        if message["method"] != "update_leds":
+            self._sent[message["id"]] = (message["method"], self._last_send)
 
     def _messages(self) -> list[dict]:
         """Every message waiting from the lamp, without blocking."""
@@ -313,7 +323,8 @@ class Lamp:
     def _note(self, message: dict) -> None:
         """Act on a message nobody was waiting for. A refused token in the
         current session means the lamp has ended it; a frame refused as an
-        illegal request, that the session has left direct mode."""
+        illegal request, that the session has left direct mode. Any other
+        error is logged the first time it comes in a session."""
         error = message.get("error")
         message_id = message.get("id")
         if (
@@ -338,6 +349,17 @@ class Lamp:
                 "Turning direct mode on again in the same session."
             )
             self._left_direct = True
+        elif error.get("code") not in (TOKEN_REFUSED, ILLEGAL_REQUEST):
+            key = json.dumps(error, sort_keys=True)
+            if key in self._reported:
+                return
+            self._reported.add(key)
+            method = self._sent.get(message_id, ("update_leds", 0.0))[0]
+            LOG.warning(
+                "The lamp answered message %d, %s, with an error the bridge does not act on: %s. "
+                "Any more like it in this session are counted in the status line, not logged.",
+                message_id, method, json.dumps(message)[:300],
+            )
 
     def drain(self) -> None:
         """Read whatever the lamp sent unasked, keep-alive answers among it."""
@@ -386,6 +408,7 @@ class Lamp:
         self.token = token
         self._session_from = first
         self._left_direct = False
+        self._reported.clear()
         self._opened_at = time.monotonic()
         self._last_keep_alive = self._opened_at
         self.sessions += 1
