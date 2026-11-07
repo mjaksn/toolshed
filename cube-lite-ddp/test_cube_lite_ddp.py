@@ -143,13 +143,16 @@ class BridgeTest(unittest.TestCase):
     origin = "top-left"
     stats_every = 0.0
     probe = None
+    max_fps = cube.MAX_FPS
 
     def setUp(self) -> None:
         logging.getLogger("cube_lite_ddp").setLevel(logging.CRITICAL)
         self.fake = FakeLamp()
         self.fake.start()
         self.lamp = cube.Lamp(LOOPBACK, self.fake.port)
-        self.bridge = cube.Bridge(self.lamp, LOOPBACK, 0, self.origin, self.stats_every, self.probe)
+        self.bridge = cube.Bridge(
+            self.lamp, LOOPBACK, 0, self.origin, self.stats_every, self.probe, self.max_fps,
+        )
         self.sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.stopping = threading.Event()
         self.thread = threading.Thread(target=self.bridge.run, args=(self.stopping,), daemon=True)
@@ -241,6 +244,25 @@ class ForwardingTest(BridgeTest):
         self.assertGreaterEqual(len(shown), 3)
         self.assertEqual(len({token for _, token, _, _ in shown}), 1)
         self.assertEqual(self.fake.methods.count("udp_sess_new"), 1)
+
+
+class MaxFpsTest(BridgeTest):
+    max_fps = 5
+
+    def test_frames_are_held_to_the_cap_with_the_newest_shown(self):
+        # LedFx's side at 20 a second for a second and a half: at 5 a second
+        # the lamp gets about eight, the first at once.
+        frames = [rows_frame([(n, n, n)] * cube.ROWS) for n in range(30)]
+        for frame in frames:
+            self.send(ddp(frame))
+            time.sleep(0.05)
+        self.assertTrue(wait_for(lambda: self.fake.frames and self.fake.frames[-1][3] == frames[-1]))
+        shown = self.shown()
+        self.assertGreaterEqual(len(shown), 6)
+        self.assertLessEqual(len(shown), 10)
+        gaps = [b[0] - a[0] for a, b in itertools.pairwise(shown)]
+        # On the beat a late frame shortens the next gap, never by a whole one.
+        self.assertTrue(all(gap > 0.1 for gap in gaps), gaps)
 
 
 class BottomLeftTest(BridgeTest):
@@ -589,6 +611,12 @@ class CommandLineTest(unittest.TestCase):
         for value in ("1", "-1", "nan"):
             with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
                 cube.main([LOOPBACK, "--stats", value])
+            self.assertEqual(raised.exception.code, 2, value)
+
+    def test_max_fps_out_of_range_is_refused(self):
+        for value in ("0", "-5", "31", "fast"):
+            with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
+                cube.main([LOOPBACK, "--max-fps", value])
             self.assertEqual(raised.exception.code, 2, value)
 
     def test_lamp_is_required(self):

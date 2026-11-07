@@ -101,6 +101,7 @@ rather than anything here.
 | `--port PORT` | The UDP port to listen for DDP on. 4048 by default, DDP's own. |
 | `--origin top-left` | Where the first pixel of a frame belongs. `top-left`, the default, is the order LedFx lays a matrix out in. `bottom-left` is the lamp's own order, for a sender that already uses it. |
 | `--stats SECONDS` | Logs a status line every `SECONDS` while frames flow, and tries the lamp's TCP port as often; see below. Off by default, and at least 5 when on. |
+| `--max-fps N` | Sends the lamp at most `N` frames a second, from 1 to 30, dropping the rest and keeping the newest as ever. 30 by default, as many as the lamp takes. LedFx sends no fewer than 10 a second, so this is the way to go lower. |
 
 ## Tracking down a hang
 
@@ -213,7 +214,7 @@ They cover:
 - packets that are not pixels: queries and replies, another DDP version, a
   destination other than the display, and packets cut short;
 - frames sent faster than the lamp takes them, held to its rate with the
-  newest shown;
+  newest shown, and held to a lower rate set with `--max-fps`;
 - a stream carried in one session;
 - keep-alives sent while frames flow;
 - a session the lamp has ended, found by a refused keep-alive or a refused
@@ -232,6 +233,7 @@ They cover:
   it and a lamp that is gone, sending nothing, and logging only a change;
 - the frame fitting in one of the lamp's datagrams, and the test pattern;
 - `--test` against a lamp and against no lamp, a port in use, no lamp
-  address given, and a `--stats` interval that is too short.
+  address given, a `--stats` interval that is too short, and a `--max-fps`
+  out of range.
 
-They take about thirteen seconds, or about seventeen on Windows.
+They take about fifteen seconds, or about nineteen on Windows.
