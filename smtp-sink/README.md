@@ -308,6 +308,7 @@ pull in the **Deploy** menu, or **Up** instead.
 | `SMTP_SINK_ADDRESS` | Host address the port is published on, `127.0.0.1` by default, so out of the box only the host itself can send. Set the host's LAN address for devices on the LAN. |
 | `SMTP_SINK_PORT` | Host port, 2525 by default. 25 works too, for a device that only sends to the standard port, and needs no privileges inside the container, which listens on 2525 either way. |
 | `TZ` | Time zone for the timestamps in the log and the webhook, such as `America/Chicago`. UTC by default. |
+| `SMTP_SINK_WEBHOOK_URL` | The URL given to `--webhook-url`. Required: Compose refuses to start the project without it, rather than starting a sink that forwards nothing. It lives in `.env` rather than in `compose.yaml` because many webhook URLs, Home Assistant's among them, carry their only secret in the path. |
 
 Inside the container the sink binds `0.0.0.0`, which is only the container's
 own network. The care the warning below asks of `--bind` moves to
@@ -316,9 +317,11 @@ address of the host is reachable whatever ufw says, because Docker writes its
 own firewall rules ahead of ufw's.
 
 Syslog and webhook options go in the compose file's `command:`, as they would
-on the command line; the bind address, port and log file are set already. A
-syslog server or webhook on the host itself is not at `127.0.0.1` from inside
-the container; use the host's LAN address.
+on the command line; the bind address, port and log file are set already. The
+file passes `--webhook-url` there already; to run without a webhook, take those
+two lines out, and with no forwarding at all, the whole `command:`. A syslog
+server or webhook on the host itself is not at `127.0.0.1` from inside the
+container; use the host's LAN address.
 
 The log is `/data/smtp_sink.log` on a named volume, so it survives the
 container being recreated. `docker exec smtp-sink tail -f /data/smtp_sink.log`
