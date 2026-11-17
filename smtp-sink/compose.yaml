@@ -9,6 +9,11 @@
 #   SMTP_SINK_PORT     host port, 2525 by default; 25 for a device that can
 #                      only send to the standard port
 #   TZ                 time zone for the timestamps, UTC by default
+#   SMTP_SINK_WEBHOOK_URL
+#                      where each message is sent as JSON; required. A
+#                      receiver on this host is at its LAN address, not at
+#                      127.0.0.1. Kept here rather than below because a
+#                      webhook URL often carries its secret in the path.
 
 services:
   smtp-sink:
@@ -25,8 +30,12 @@ services:
       - "${SMTP_SINK_ADDRESS:-127.0.0.1}:${SMTP_SINK_PORT:-2525}:2525"
     volumes:
       - smtp-sink-data:/data
-    # Forwarding options go here, as they would on the command line:
-    # command: ["--syslog", "192.168.1.10", "--syslog-body"]
+    # Forwarding options go here, as they would on the command line, such as
+    # "--syslog", "192.168.1.10", "--syslog-body". Without a webhook, drop the
+    # two lines below; without any forwarding, drop the whole command.
+    command:
+      - "--webhook-url"
+      - "${SMTP_SINK_WEBHOOK_URL:?set SMTP_SINK_WEBHOOK_URL in .env}"
 
 volumes:
   smtp-sink-data:
