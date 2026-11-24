@@ -456,6 +456,113 @@ reporter's exit status, and the journal, which shows any error from curl. The
 server's retention runs can report the same way; see Reporting the outcome
 under Retention.
 
+### Watching the reports
+
+A reporter speaks only when its job runs. A host that is switched off or goes
+down mid-run, a timer that was disabled, or a webhook URL that went stale all
+fail in silence, so alerting on failed reports alone misses them. Watch for
+the absence of a success as well.
+
+In Home Assistant that is one package: two trigger-based template sensors per
+job, fed by that job's webhook, and two automations. The example is for one
+client, `myhost`. Copy the `template` entry for each further client and for
+the server's retention runs, and add each pair of sensors to both automations.
+It uses the `triggers:` and `actions:` spellings, so it needs Home Assistant
+2024.10 or later. The webhook ID goes in `secrets.yaml` as
+`backup_myhost_borg`, the same ID that ends the URL in the curl file.
+
+```yaml
+template:
+  - triggers:
+      - trigger: webhook
+        webhook_id: !secret backup_myhost_borg
+        allowed_methods: [POST]
+        local_only: true
+    sensor:
+      - name: myhost borg backup
+        unique_id: backup_myhost_borg
+        state: >-
+          {{ trigger.json.result if trigger.json.result in ['success', 'skipped'] else 'failed' }}
+        attributes:
+          reported_at: "{{ now().isoformat() }}"
+          detail: >-
+            {{ trigger.json.result }}, exit status {{ trigger.json.exit_status }}
+      - name: myhost borg backup last success
+        unique_id: backup_myhost_borg_last_success
+        device_class: timestamp
+        # Moves only on a success, so it survives later failures.
+        state: >-
+          {% if trigger.json.result == 'success' %}{{ now().isoformat() }}
+          {%- elif this.state not in ['unknown', 'unavailable'] %}{{ this.state }}
+          {%- else %}{{ none }}{% endif %}
+
+automation:
+  - id: backup_failed
+    alias: Backup failed
+    mode: queued
+    triggers:
+      # Every report changes reported_at, so a second failure in a row still fires.
+      - trigger: state
+        entity_id:
+          - sensor.myhost_borg_backup
+        attribute: reported_at
+    conditions:
+      # A sensor added or removed by a reload is not a new report.
+      - condition: template
+        value_template: >-
+          {{ trigger.from_state is not none and trigger.to_state is not none
+             and trigger.to_state.state != 'success' }}
+    actions:
+      - action: notify.notify
+        data:
+          title: "Backup {{ trigger.to_state.state }}"
+          message: >-
+            {{ trigger.to_state.name }}: {{ trigger.to_state.attributes.detail }}
+
+  - id: backup_overdue
+    alias: Backup overdue
+    triggers:
+      - trigger: time
+        at: "10:00:00"
+    variables:
+      overdue: >-
+        {% set ns = namespace(names=[]) %}
+        {% for b in ['myhost_borg_backup'] %}
+          {% set t = states('sensor.' ~ b ~ '_last_success') | as_datetime(none) %}
+          {% if t is none or now() - t > timedelta(hours=20) %}
+            {% set ns.names = ns.names + [state_attr('sensor.' ~ b, 'friendly_name') or b] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.names }}
+    conditions:
+      - condition: template
+        value_template: "{{ overdue | count > 0 }}"
+    actions:
+      - action: notify.notify
+        data:
+          title: Backup overdue
+          message: "No success in 20 hours: {{ overdue | join(', ') }}"
+```
+
+Replace `notify.notify` with the notify action for the phone that should hear
+about it. The first sensor holds the latest report: `success`, `skipped` for a
+retention run that skipped a client, or `failed` for anything else. Its
+`reported_at` changes on every report, which is what lets two failures in a
+row notify twice. The second sensor moves only on a success, and it is the one
+the overdue check reads. Trigger-based template sensors keep their state
+across a restart of Home Assistant. For the retention runs, `trigger.json.mode`
+and `trigger.json.skipped_clients` make a more useful `detail`.
+
+The time and the threshold go together. With the timer at 03:30 and retention
+at 05:00, a healthy job's newest success is at most about six and a half hours
+old at 10:00, and one that missed a night is at least thirty. Twenty hours sits
+between the two, so a good morning stays quiet and a missed night is named the
+same day. Move both if the schedule moves.
+
+`local_only: true` refuses posts from outside the local network. Within it, the
+webhook ID is the only secret, which is why it lives in a root-only curl file
+on the sending side and in `secrets.yaml` on this one.
+
 ### Changing what is backed up
 
 Edit `/etc/borg-backup.env`. The next backup reads it; nothing needs running
@@ -679,7 +786,9 @@ url = "http://homeassistant.lan:8123/api/webhook/<id>"
 A Home Assistant webhook trigger is one consumer; anything that takes a JSON
 POST will do. The post is tried four times in all, and one that still fails
 is said in the output and never changes the exit status. Each client can
-report its own backups the same way; see Reporting each run.
+report its own backups the same way; see Reporting each run. To be told when a
+report says something went wrong, or when reports stop arriving, see Watching
+the reports.
 
 ### A deeper check
 
